@@ -2,9 +2,12 @@ package x32
 
 import (
 	"fmt"
-	"github.com/hypebeast/go-osc/osc"
 	"strconv"
 	"strings"
+	"net"
+
+	"github.com/scgolang/osc"
+	"github.com/golang/glog"
 )
 
 type ProxyConfig struct {
@@ -14,9 +17,9 @@ type ProxyConfig struct {
 }
 
 type Proxy struct {
-	server       *osc.Server
-	reaperClient *osc.Client
-	x32Client    *osc.Client
+	server       *osc.UDPConn
+	reaperClient *osc.UDPConn
+	x32Client    *osc.UDPConn
 }
 
 func splitAddress(a string) (string, int, error) {
@@ -37,28 +40,45 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid ListenAddress: %q", err)
 	}
-	xAddr, xPort, err := splitAddress(config.ListenAddress)
+	lConn, err := osc.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(lAddr), Port: lPort})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't create listen UDP connection: %q", err)
+	}
+	xAddr, xPort, err := splitAddress(config.X32Address)
 	if err != nil {
 		return nil, fmt.Errorf("invalid X32Address: %q", err)
+	}
+	xConn, err := osc.DialUDP("udp", nil, &net.UDPAddr{IP: net.ParseIP(xAddr), Port: xPort})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't create x32 UDP connection: %q", err)
 	}
 	rAddr, rPort, err := splitAddress(config.ReaperAddress)
 	if err != nil {
 		return nil, fmt.Errorf("invalid ReaperAddress: %q", err)
 	}
-
-	p := &Proxy{
-		server:       &osc.Server{Addr: fmt.Sprintf("%s:%d", lAddr, lPort)},
-		reaperClient: osc.NewClient(rAddr, rPort),
-		x32Client:    osc.NewClient(xAddr, xPort),
+	rConn, err := osc.DialUDP("udp", nil, &net.UDPAddr{IP: net.ParseIP(rAddr), Port: rPort})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't create reaper UDP connection: %q", err)
 	}
 
-	p.server.Handle("/message/address", func(msg *osc.Message) {
-		osc.PrintMessage(msg)
-	})
+	lConn.SetExactMatch(false)
+
+	p := &Proxy{
+		server:       lConn,
+		reaperClient: rConn,
+		x32Client:    xConn,
+	}
+
 
 	return p, nil
 }
 
 func (p *Proxy) ListenAndServe() error {
-	return p.server.ListenAndServe()
+	p.server.SetExactMatch(false)
+	return p.server.Serve(1, osc.Dispatcher{
+		"/track/*/volume": osc.Method(func(msg osc.Message) error {
+			glog.Info("got a message")
+			return nil
+	}),
+})
 }

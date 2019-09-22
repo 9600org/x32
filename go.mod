@@ -4,5 +4,7 @@ go 1.12
 
 require (
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
-	github.com/hypebeast/go-osc v0.0.0-20181130121958-adefe22206c1
+	github.com/imdario/go-ulid v0.0.0-20180116185620-aeb52bf96595 // indirect
+	github.com/pkg/errors v0.8.1 // indirect
+	github.com/scgolang/osc v0.10.0
 )
