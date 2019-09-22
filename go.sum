@@ -1,0 +1,4 @@
+github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b h1:VKtxabqXZkF25pY9ekfRL6a582T4P37/31XEstQ5p58=
+github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b/go.mod h1:SBH7ygxi8pfUlaOkMMuAQtPIUF8ecWP5IEl/CR7VP2Q=
+github.com/hypebeast/go-osc v0.0.0-20181130121958-adefe22206c1 h1:csLuD/R1zpC5lpYGOQybOfpxI68kHU+eS13QZ26DZrM=
+github.com/hypebeast/go-osc v0.0.0-20181130121958-adefe22206c1/go.mod h1:VCiuhv+/+jPFqHeZAgVC61Cr4drPso5XEEKmEiqCsuU=
