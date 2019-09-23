@@ -2,18 +2,20 @@ package x32
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
-	"net"
 
-	"github.com/scgolang/osc"
 	"github.com/golang/glog"
+	"github.com/scgolang/osc"
 )
 
 type ProxyConfig struct {
-	ListenAddress string
-	ReaperAddress string
-	X32Address    string
+	ListenAddress string `yaml:"listenAddress"`
+	ReaperAddress string `yaml:"reaperAddress"`
+	X32Address    string `yaml:"x32Address"`
+
+	Mapping map[string]string `yaml:"mapping"`
 }
 
 type Proxy struct {
@@ -25,7 +27,7 @@ type Proxy struct {
 func splitAddress(a string) (string, int, error) {
 	bits := strings.Split(a, ":")
 	if c := len(bits); c != 2 {
-		return "", 0, fmt.Errorf("invalid address:port - found %d ':', expected 1", c)
+		return "", 0, fmt.Errorf("invalid address:port - found %d parts, expected 2", c)
 	}
 	port, err := strconv.Atoi(bits[1])
 	if err != nil {
@@ -69,7 +71,6 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 		x32Client:    xConn,
 	}
 
-
 	return p, nil
 }
 
@@ -79,6 +80,6 @@ func (p *Proxy) ListenAndServe() error {
 		"/track/*/volume": osc.Method(func(msg osc.Message) error {
 			glog.Info("got a message")
 			return nil
-	}),
-})
+		}),
+	})
 }

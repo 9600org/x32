@@ -1,11 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"github.com/9600org/x32"
 	"github.com/golang/glog"
 	"io/ioutil"
+
+	"github.com/go-yaml/yaml"
 )
 
 var (
@@ -21,7 +22,7 @@ func main() {
 		glog.Exitf("Failed to read config file: %s", err)
 	}
 	config := x32.ProxyConfig{}
-	if err := json.Unmarshal([]byte(confRaw), &config); err != nil {
+	if err := yaml.Unmarshal([]byte(confRaw), &config); err != nil {
 		glog.Exitf("Couldn't parse config file: %s", err)
 	}
 
