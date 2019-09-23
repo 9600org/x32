@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/scgolang/osc"
@@ -24,6 +25,8 @@ type Proxy struct {
 	x32Client    *osc.UDPConn
 
 	mapping mapping
+
+	dispatcher osc.Dispatcher
 }
 
 type mapping struct {
@@ -182,10 +185,51 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 
 func (p *Proxy) ListenAndServe() error {
 	p.server.SetExactMatch(false)
-	return p.server.Serve(1, osc.Dispatcher{
-		"/track/*/volume": osc.Method(func(msg osc.Message) error {
-			glog.Info("got a message")
-			return nil
-		}),
-	})
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		for {
+			select {
+			case <-t.C:
+				// send xremote
+				glog.Infof("xremote")
+				if err := p.x32Client.Send(osc.Message{Address: "/xremote"}); err != nil {
+					glog.Warningf("Failed to send xremote: %v", err)
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	d := p.buildReaperDispatcher()
+
+	return p.server.Serve(1, d)
+}
+
+var trackMaps = []string{
+	"mix/fader",
+	"mix/on",
+	"mix/pan",
+}
+
+func (p *Proxy) buildReaperDispatcher() osc.Dispatcher {
+	r := make(osc.Dispatcher)
+
+	for k, v := range p.mapping.reaper {
+		for _, m := range trackMaps {
+			reaAddr := fmt.Sprintf("/%s/%s", k, m)
+			x32Addr := fmt.Sprintf("/%s/%s", v, m)
+			r[reaAddr] = osc.Method(func(msg osc.Message) error {
+				glog.Infof("R-> %s", reaAddr)
+				return p.x32Client.Send(osc.Message{
+					Address:   x32Addr,
+					Arguments: msg.Arguments,
+				})
+			})
+		}
+	}
+	return r
 }
