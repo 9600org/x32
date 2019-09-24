@@ -3,6 +3,7 @@ package x32
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ type ProxyConfig struct {
 	X32Address    string `yaml:"x32Address"`
 
 	Mapping map[string]string `yaml:"mapping"`
+
+	NameHints map[string]string `yaml:"nameHints"`
 }
 
 type Proxy struct {
@@ -29,12 +32,59 @@ type Proxy struct {
 
 	mapping mapping
 
+	nameHints []nameHint
+
 	dispatcher osc.Dispatcher
 }
 
 type mapping struct {
 	reaper map[string]x32Target
 	x32    map[string]reaperTarget
+}
+
+var colours = map[string]int{
+	"OFF":  0,
+	"RD":   1,
+	"GN":   2,
+	"YE":   3,
+	"BL":   4,
+	"MG":   5,
+	"CY":   6,
+	"WH":   7,
+	"OFFi": 8,
+	"RDi":  9,
+	"GNi":  10,
+	"YEi":  11,
+	"BLi":  12,
+	"MGi":  13,
+	"CYi":  14,
+	"WHi":  15,
+}
+
+type nameHint struct {
+	matcher *regexp.Regexp
+	icon    int
+	colour  int
+}
+
+func newNameHint(m, hint string) (*nameHint, error) {
+	ret := &nameHint{}
+	var err error
+	ret.matcher, err = regexp.Compile(m)
+	if err != nil {
+		return nil, err
+	}
+	hintBits := strings.Split(hint, " ")
+	if len(hintBits) >= 1 {
+		ret.icon, err = strconv.Atoi(hintBits[0])
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(hintBits) == 2 {
+		ret.colour = colours[hintBits[1]]
+	}
+	return ret, nil
 }
 
 type x32Target struct {
@@ -178,6 +228,18 @@ func buildMapping(conf map[string]string) (*mapping, error) {
 	return &ret, nil
 }
 
+func buildNameHints(src map[string]string) ([]nameHint, error) {
+	r := make([]nameHint, 0, len(src))
+	for k, v := range src {
+		nh, err := newNameHint(k, v)
+		if err != nil {
+			return nil, err
+		}
+		r = append(r, *nh)
+	}
+	return r, nil
+}
+
 type Client struct {
 	Conn *net.UDPConn
 }
@@ -230,6 +292,12 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	nameHints, err := buildNameHints(config.NameHints)
+	if err != nil {
+		return nil, err
+	}
+
 	p := &Proxy{
 		reaperServer: reaperServer,
 		reaperClient: rClient,
@@ -237,6 +305,7 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 		x32Client:    xClient,
 		x32ServeConn: xServerConn,
 		mapping:      *mapping,
+		nameHints:    nameHints,
 	}
 
 	return p, nil
@@ -365,6 +434,27 @@ func FilterUnselect(m []*osc.Message) []*osc.Message {
 	return ret
 }
 
+func GuessIconAndColour(m []*osc.Message) []*osc.Message {
+	ret := make([]*osc.Message, 0, len(m)*3)
+	for _, msg := range m {
+		if l := len(msg.Arguments); l != 1 {
+			glog.Errorf("Expected name message to have 1 arg, got %d", l)
+			continue
+		}
+		name, ok := msg.Arguments[0].(string)
+		if !ok {
+			glog.Errorf("Expected name message argument to be string, found %T", msg.Arguments[0])
+			continue
+		}
+		ret = append(ret, msg)
+
+		//TODO: guess
+		_ = name
+
+	}
+	return ret
+}
+
 func (t *targetTransform) Apply(m *osc.Message) []*osc.Message {
 	if t.transform != nil {
 		return t.transform([]*osc.Message{m})
@@ -390,6 +480,9 @@ var (
 		},
 		"solo": targetTransform{target: "-stat/solosw", targetType: x32Stat,
 			transform: FloatToInt,
+		},
+		"name": targetTransform{target: "config/name", targetType: x32Strip,
+			transform: GuessIconAndColour,
 		},
 	}
 
