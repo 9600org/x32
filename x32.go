@@ -2,12 +2,14 @@ package x32
 
 import (
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/golang/glog"
 	"github.com/hypebeast/go-osc/osc"
+	"golang.org/x/sync/errgroup"
 )
 
 type ProxyConfig struct {
@@ -19,9 +21,11 @@ type ProxyConfig struct {
 }
 
 type Proxy struct {
-	server       *osc.Server
+	reaperServer *osc.Server
 	reaperClient *osc.Client
-	x32Client    *osc.Client
+	x32Server    *osc.Server
+	x32Client    Client
+	x32ServeConn net.PacketConn
 
 	mapping mapping
 
@@ -43,15 +47,18 @@ type reaperTarget struct {
 }
 
 func splitAddress(a string) (string, int, error) {
-	bits := strings.Split(a, ":")
-	if c := len(bits); c != 2 {
-		return "", 0, fmt.Errorf("invalid address:port - found %d parts, expected 2", c)
-	}
-	port, err := strconv.Atoi(bits[1])
+	host, portString, err := net.SplitHostPort(a)
 	if err != nil {
-		return "", 0, fmt.Errorf("invalid port: %v", err)
+		return "", 0, err
 	}
-	return bits[0], port, nil
+	if strings.Contains(host, ":") {
+		host = fmt.Sprintf("[%s]", host)
+	}
+	port, err := net.LookupPort("udp", portString)
+	if err != nil {
+		return "", 0, err
+	}
+	return host, port, nil
 }
 
 func parseRange(r string) (int, int, error) {
@@ -148,14 +155,40 @@ func buildMapping(conf map[string]string) (*mapping, error) {
 	return &ret, nil
 }
 
+type Client struct {
+	Conn *net.UDPConn
+}
+
+func (c *Client) Send(p osc.Packet) error {
+	data, err := p.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	if _, err := c.Conn.Write(data); err != nil {
+		return err
+	}
+	return nil
+}
+
 func NewProxy(config ProxyConfig) (*Proxy, error) {
 	// Validate config addresses
-	server := &osc.Server{Addr: config.ListenAddress}
+	reaperServer := &osc.Server{Addr: config.ListenAddress}
+	xServer := &osc.Server{}
+
 	xAddr, xPort, err := splitAddress(config.X32Address)
 	if err != nil {
 		return nil, fmt.Errorf("invalid X32Address: %q", err)
 	}
-	xClient := osc.NewClient(xAddr, xPort)
+	xIP, err := net.LookupIP(xAddr)
+	if err != nil {
+		return nil, fmt.Errorf("unable to lookup IP: %s", err)
+	}
+	xServerConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: xIP[0], Port: xPort})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to listen on UDP port: %s", err)
+	}
+	xClient := Client{xServerConn}
+
 	rAddr, rPort, err := splitAddress(config.ReaperAddress)
 	if err != nil {
 		return nil, fmt.Errorf("invalid ReaperAddress: %q", err)
@@ -167,9 +200,11 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 		return nil, err
 	}
 	p := &Proxy{
-		server:       server,
+		reaperServer: reaperServer,
 		reaperClient: rClient,
+		x32Server:    xServer,
 		x32Client:    xClient,
+		x32ServeConn: xServerConn,
 		mapping:      *mapping,
 	}
 
@@ -195,16 +230,27 @@ func (p *Proxy) ListenAndServe() error {
 		}
 	}()
 
-	p.server.Dispatcher = osc.NewOscDispatcher()
-	p.buildReaperDispatcher(p.server.Dispatcher)
+	p.reaperServer.Dispatcher = osc.NewOscDispatcher()
+	p.buildReaperDispatcher(p.reaperServer.Dispatcher)
 
-	return p.server.ListenAndServe()
+	p.x32Server.Dispatcher = osc.NewOscDispatcher()
+	p.buildX32Dispatcher(p.x32Server.Dispatcher)
+
+	errGroup := errgroup.Group{}
+	errGroup.Go(func() error {
+		return p.x32Server.Serve(p.x32ServeConn)
+	})
+
+	errGroup.Go(p.reaperServer.ListenAndServe)
+
+	return errGroup.Wait()
 }
 
 type TargetType int
 
 const (
 	reaperTrack           TargetType = iota
+	reaperTrackFromArg               = iota
 	x32Strip                         = iota
 	x32Stat                          = iota
 	x32StatWithAddressArg            = iota
@@ -225,6 +271,20 @@ func FloatToInt(m []*osc.Message) []*osc.Message {
 				continue
 			}
 			m[mi].Arguments[i] = int32(f)
+		}
+	}
+	return m
+}
+
+func IntToFloat(m []*osc.Message) []*osc.Message {
+	for mi := range m {
+		for i, a := range m[mi].Arguments {
+			f, ok := a.(int32)
+			if !ok {
+				glog.Errorf("Attempting to read int32 from %T failed", a)
+				continue
+			}
+			m[mi].Arguments[i] = float32(f)
 		}
 	}
 	return m
@@ -282,6 +342,8 @@ func (t *targetTransform) Apply(m *osc.Message) []*osc.Message {
 }
 
 var (
+	// reaperX32StripMap is a map of all /track/${ID}/... subaddresses which
+	// are sent by Reaper, and their corresponding X32 targets.
 	reaperX32StripMap = map[string]targetTransform{
 		"volume": targetTransform{target: "mix/fader", targetType: x32Strip},
 		"mute": targetTransform{target: "mix/on", targetType: x32Strip,
@@ -300,11 +362,28 @@ var (
 		},
 	}
 
+	// x32eaperStripMap is a map of all addresses which
+	// are sent by Reaper, and their corresponding X32 targets.
 	x32ReaperStripMap = map[string]targetTransform{
-		"mix/fader": targetTransform{target: "volume"},
-		"mix/on":    targetTransform{target: "mute", transform: NotInt},
-		"mix/pan":   targetTransform{target: "pan"},
-		"mix/solo":  targetTransform{target: "solo"}, //?
+		"mix/fader": targetTransform{target: "volume", targetType: reaperTrack},
+		"mix/on": targetTransform{target: "mute", targetType: reaperTrack,
+			transform: func(m []*osc.Message) []*osc.Message {
+				return IntToFloat(NotInt(m))
+			},
+		},
+		"mix/pan": targetTransform{target: "pan", targetType: reaperTrack},
+	}
+
+	x32ReaperStatMap = map[string]targetTransform{
+		"-stat/solosw": targetTransform{target: "solo", targetType: reaperTrack,
+			transform: IntToFloat,
+		},
+	}
+
+	x32ReaperFanoutStatMap = map[string]targetTransform{
+		"-stat/selidx": targetTransform{target: "select", targetType: reaperTrackFromArg,
+			transform: DropArgs,
+		},
 	}
 )
 
@@ -325,7 +404,6 @@ var (
 //  /track/../solo <-> /-stat/solosw
 
 func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
-
 	for rPfx, xTarget := range p.mapping.reaper {
 		rPfx := rPfx
 		xTarget := xTarget
@@ -374,6 +452,88 @@ func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 			default:
 				glog.Fatalf("Found unexpected targetType %v", tt.targetType)
 			}
+		}
+	}
+	return nil
+}
+
+func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
+	for xPfx, rTarget := range p.mapping.x32 {
+		xPfx := xPfx
+		rTarget := rTarget
+
+		// Track addresses
+		for xSfx, tt := range x32ReaperStripMap {
+			xSfx := xSfx
+			tt := tt
+			switch tt.targetType {
+			case reaperTrack:
+				x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
+				reaAddr := fmt.Sprintf("/%s/%s", rTarget.track, tt.target)
+				glog.Infof("Listen on %s", x32Addr)
+				d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+					glog.Infof("X-> %s %v", x32Addr, msg.Arguments)
+					for _, x32Msg := range tt.Apply(msg) {
+						x32Msg.Address = reaAddr
+						if err := p.reaperClient.Send(x32Msg); err != nil {
+							glog.Errorf("Failed to send message to Reaper: %s", err)
+						}
+					}
+				})
+			}
+		}
+
+		// Stat addresses
+		for xSfx, tt := range x32ReaperStatMap {
+			xSfx := xSfx
+			tt := tt
+			switch tt.targetType {
+			case reaperTrack:
+				x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
+				reaAddr := fmt.Sprintf("/%s/%s", rTarget.track, tt.target)
+				d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+					glog.Infof("X-> %s %v", x32Addr, msg.Arguments)
+					for _, x32Msg := range tt.Apply(msg) {
+						x32Msg.Address = reaAddr
+						if err := p.reaperClient.Send(x32Msg); err != nil {
+							glog.Errorf("Failed to send message to Reaper: %s", err)
+						}
+					}
+				})
+			default:
+				glog.Fatalf("Found unexpected stat targetType %v", tt.targetType)
+			}
+		}
+	}
+
+	// Fan-out stat
+	for xStat, tt := range x32ReaperFanoutStatMap {
+		xStat := xStat
+		tt := tt
+		switch tt.targetType {
+		case reaperTrackFromArg:
+			x32Addr := fmt.Sprintf("/%s", xStat)
+			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+				glog.Infof("X-> %s %v", x32Addr, msg.Arguments)
+				for _, x32Msg := range tt.Apply(msg) {
+					if len(x32Msg.Arguments) == 0 {
+						glog.Errorf("Got fanout stat message with zero args")
+						continue
+					}
+					id, ok := x32Msg.Arguments[0].(int32)
+					if !ok {
+						glog.Errorf("Got non-int32 fanout arg[0] of type %T", x32Msg.Arguments[0])
+						continue
+					}
+					x32Addr := fmt.Sprintf("/track/%02d/%s", id, tt.target)
+					x32Msg.Address = x32Addr
+					if err := p.reaperClient.Send(x32Msg); err != nil {
+						glog.Errorf("Failed to send message to Reaper: %s", err)
+					}
+				}
+			})
+		default:
+			glog.Fatalf("Found unexpected fanout targetType %v", tt.targetType)
 		}
 	}
 	return nil
