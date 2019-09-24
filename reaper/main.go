@@ -2,11 +2,14 @@ package main
 
 import (
 	"flag"
-	"github.com/9600org/x32"
-	"github.com/golang/glog"
 	"io/ioutil"
+	"net/http"
 
+	"github.com/9600org/x32"
 	"github.com/go-yaml/yaml"
+	"github.com/golang/glog"
+
+	_ "net/http/pprof"
 )
 
 var (
@@ -16,6 +19,10 @@ var (
 func main() {
 	flag.Parse()
 	flag.Set("logtostderr", "true")
+
+	go func() {
+		glog.Info(http.ListenAndServe("localhost:6060", nil))
+	}()
 
 	confRaw, err := ioutil.ReadFile(*config)
 	if err != nil {

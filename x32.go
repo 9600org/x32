@@ -22,7 +22,7 @@ type ProxyConfig struct {
 
 type Proxy struct {
 	reaperServer *osc.Server
-	reaperClient *osc.Client
+	reaperClient Client
 	x32Server    *osc.Server
 	x32Client    Client
 	x32ServeConn net.PacketConn
@@ -181,11 +181,11 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 	}
 	xIP, err := net.LookupIP(xAddr)
 	if err != nil {
-		return nil, fmt.Errorf("unable to lookup IP: %s", err)
+		return nil, fmt.Errorf("unable to lookup x32 IP: %s", err)
 	}
 	xServerConn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: xIP[0], Port: xPort})
 	if err != nil {
-		return nil, fmt.Errorf("Failed to listen on UDP port: %s", err)
+		return nil, fmt.Errorf("failed to dial x32: %s", err)
 	}
 	xClient := Client{xServerConn}
 
@@ -193,7 +193,15 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid ReaperAddress: %q", err)
 	}
-	rClient := osc.NewClient(rAddr, rPort)
+	rIP, err := net.LookupIP(rAddr)
+	if err != nil {
+		return nil, fmt.Errorf("unable to lookup reaper IP: %s", err)
+	}
+	rClientConn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: rIP[0], Port: rPort})
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial reaper: %v", err)
+	}
+	rClient := Client{rClientConn}
 
 	mapping, err := buildMapping(config.Mapping)
 	if err != nil {
@@ -415,7 +423,7 @@ func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
 				x32Addr := fmt.Sprintf("/%s/%s", xTarget.strip, tt.target)
 				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
-					glog.Infof("R-> %s %v", reaAddr, msg.Arguments)
+					glog.V(1).Infof("R-> %s %v", reaAddr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
 						x32Msg.Address = x32Addr
 						if err := p.x32Client.Send(x32Msg); err != nil {
@@ -427,7 +435,7 @@ func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
 				x32Addr := fmt.Sprintf("/%s/%02d", tt.target, xTarget.statIndex)
 				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
-					glog.Infof("R-> %s %v", reaAddr, msg.Arguments)
+					glog.V(1).Infof("R-> %s %v", reaAddr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
 						x32Msg.Address = x32Addr
 						if err := p.x32Client.Send(x32Msg); err != nil {
@@ -439,7 +447,7 @@ func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
 				x32Addr := fmt.Sprintf("/%s", tt.target)
 				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
-					glog.Infof("R-> %s %v", reaAddr, msg.Arguments)
+					glog.V(1).Infof("R-> %s %v", reaAddr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
 						x32Msg.Arguments = append([]interface{}{int32(xTarget.statIndex - 1)}, x32Msg.Arguments...)
 						x32Msg.Address = x32Addr
@@ -472,7 +480,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 				reaAddr := fmt.Sprintf("/%s/%s", rTarget.track, tt.target)
 				glog.Infof("Listen on %s", x32Addr)
 				d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
-					glog.Infof("X-> %s %v", x32Addr, msg.Arguments)
+					glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
 						x32Msg.Address = reaAddr
 						if err := p.reaperClient.Send(x32Msg); err != nil {
@@ -492,7 +500,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 				x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
 				reaAddr := fmt.Sprintf("/%s/%s", rTarget.track, tt.target)
 				d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
-					glog.Infof("X-> %s %v", x32Addr, msg.Arguments)
+					glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
 						x32Msg.Address = reaAddr
 						if err := p.reaperClient.Send(x32Msg); err != nil {
@@ -514,7 +522,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 		case reaperTrackFromArg:
 			x32Addr := fmt.Sprintf("/%s", xStat)
 			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
-				glog.Infof("X-> %s %v", x32Addr, msg.Arguments)
+				glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
 				for _, x32Msg := range tt.Apply(msg) {
 					if len(x32Msg.Arguments) == 0 {
 						glog.Errorf("Got fanout stat message with zero args")
