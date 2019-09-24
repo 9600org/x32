@@ -5,7 +5,8 @@ go 1.12
 require (
 	github.com/go-yaml/yaml v2.1.0+incompatible
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
-	github.com/imdario/go-ulid v0.0.0-20180116185620-aeb52bf96595 // indirect
-	github.com/pkg/errors v0.8.1 // indirect
-	github.com/scgolang/osc v0.10.0
+	github.com/hypebeast/go-osc v0.0.0-20181130121958-adefe22206c1
+	github.com/kr/pretty v0.1.0 // indirect
+	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
+	gopkg.in/yaml.v2 v2.2.2 // indirect
 )

@@ -2,13 +2,12 @@ package x32
 
 import (
 	"fmt"
-	"net"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/golang/glog"
-	"github.com/scgolang/osc"
+	"github.com/hypebeast/go-osc/osc"
 )
 
 type ProxyConfig struct {
@@ -20,9 +19,9 @@ type ProxyConfig struct {
 }
 
 type Proxy struct {
-	server       *osc.UDPConn
-	reaperClient *osc.UDPConn
-	x32Client    *osc.UDPConn
+	server       *osc.Server
+	reaperClient *osc.Client
+	x32Client    *osc.Client
 
 	mapping mapping
 
@@ -151,39 +150,26 @@ func buildMapping(conf map[string]string) (*mapping, error) {
 
 func NewProxy(config ProxyConfig) (*Proxy, error) {
 	// Validate config addresses
-	lAddr, lPort, err := splitAddress(config.ListenAddress)
-	if err != nil {
-		return nil, fmt.Errorf("invalid ListenAddress: %q", err)
-	}
-	lConn, err := osc.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(lAddr), Port: lPort})
-	if err != nil {
-		return nil, fmt.Errorf("couldn't create listen UDP connection: %q", err)
-	}
+	server := &osc.Server{Addr: config.ListenAddress}
 	xAddr, xPort, err := splitAddress(config.X32Address)
 	if err != nil {
 		return nil, fmt.Errorf("invalid X32Address: %q", err)
 	}
-	xConn, err := osc.DialUDP("udp", nil, &net.UDPAddr{IP: net.ParseIP(xAddr), Port: xPort})
-	if err != nil {
-		return nil, fmt.Errorf("couldn't create x32 UDP connection: %q", err)
-	}
+	xClient := osc.NewClient(xAddr, xPort)
 	rAddr, rPort, err := splitAddress(config.ReaperAddress)
 	if err != nil {
 		return nil, fmt.Errorf("invalid ReaperAddress: %q", err)
 	}
-	rConn, err := osc.DialUDP("udp", nil, &net.UDPAddr{IP: net.ParseIP(rAddr), Port: rPort})
-	if err != nil {
-		return nil, fmt.Errorf("couldn't create reaper UDP connection: %q", err)
-	}
+	rClient := osc.NewClient(rAddr, rPort)
 
 	mapping, err := buildMapping(config.Mapping)
 	if err != nil {
 		return nil, err
 	}
 	p := &Proxy{
-		server:       lConn,
-		reaperClient: rConn,
-		x32Client:    xConn,
+		server:       server,
+		reaperClient: rClient,
+		x32Client:    xClient,
 		mapping:      *mapping,
 	}
 
@@ -191,8 +177,6 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 }
 
 func (p *Proxy) ListenAndServe() error {
-	p.server.SetExactMatch(false)
-
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -202,7 +186,7 @@ func (p *Proxy) ListenAndServe() error {
 			case <-t.C:
 				// send xremote
 				glog.Infof("xremote")
-				if err := p.x32Client.Send(osc.Message{Address: "/xremote"}); err != nil {
+				if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
 					glog.Warningf("Failed to send xremote: %v", err)
 				}
 			case <-done:
@@ -211,9 +195,10 @@ func (p *Proxy) ListenAndServe() error {
 		}
 	}()
 
-	d := p.buildReaperDispatcher()
+	p.server.Dispatcher = osc.NewOscDispatcher()
+	p.buildReaperDispatcher(p.server.Dispatcher)
 
-	return p.server.Serve(1, d)
+	return p.server.ListenAndServe()
 }
 
 type TargetType int
@@ -228,29 +213,29 @@ const (
 type targetTransform struct {
 	targetType TargetType
 	target     string
-	transform  func([]osc.Message) []osc.Message
+	transform  func([]*osc.Message) []*osc.Message
 }
 
-func FloatToInt(m []osc.Message) []osc.Message {
+func FloatToInt(m []*osc.Message) []*osc.Message {
 	for mi := range m {
 		for i, a := range m[mi].Arguments {
-			f, err := a.ReadFloat32()
-			if err != nil {
-				glog.Errorf("Attempting to read float from %v failed: %v", a.Typetag(), err)
+			f, ok := a.(float32)
+			if !ok {
+				glog.Errorf("Attempting to read float32 from %T failed", a)
 				continue
 			}
-			m[mi].Arguments[i] = osc.Int(f)
+			m[mi].Arguments[i] = int32(f)
 		}
 	}
 	return m
 }
 
-func NotInt(m []osc.Message) []osc.Message {
+func NotInt(m []*osc.Message) []*osc.Message {
 	for mi := range m {
 		for i, a := range m[mi].Arguments {
-			v, err := a.ReadInt32()
-			if err != nil {
-				glog.Errorf("Attempting to read Int from %v failed: %v", a.Typetag(), err)
+			v, ok := a.(int32)
+			if !ok {
+				glog.Errorf("Attempting to read int32 from %T failed", a)
 				continue
 			}
 			if v == 0 {
@@ -258,26 +243,26 @@ func NotInt(m []osc.Message) []osc.Message {
 			} else {
 				v = 0
 			}
-			m[mi].Arguments[i] = osc.Int(v)
+			m[mi].Arguments[i] = int32(v)
 		}
 	}
 	return m
 }
 
-func DropArgs(m []osc.Message) []osc.Message {
+func DropArgs(m []*osc.Message) []*osc.Message {
 	for i := range m {
 		m[i].Arguments = nil
 	}
 	return m
 }
 
-func FilterUnselect(m []osc.Message) []osc.Message {
-	ret := make([]osc.Message, 0, len(m))
+func FilterUnselect(m []*osc.Message) []*osc.Message {
+	ret := make([]*osc.Message, 0, len(m))
 	for mi := range m {
 		if len(m[mi].Arguments) == 1 {
-			f, err := m[mi].Arguments[0].ReadFloat32()
-			if err != nil {
-				glog.Errorf("Attempting to read float from %v failed: %v", m[mi].Arguments[0].Typetag(), err)
+			f, ok := m[mi].Arguments[0].(float32)
+			if !ok {
+				glog.Errorf("Attempting to read float from %T failed", m[mi].Arguments[0])
 			} else {
 				if f == 0 {
 					continue
@@ -289,24 +274,24 @@ func FilterUnselect(m []osc.Message) []osc.Message {
 	return ret
 }
 
-func (t *targetTransform) Apply(m osc.Message) []osc.Message {
+func (t *targetTransform) Apply(m *osc.Message) []*osc.Message {
 	if t.transform != nil {
-		return t.transform([]osc.Message{m})
+		return t.transform([]*osc.Message{m})
 	}
-	return []osc.Message{m}
+	return []*osc.Message{m}
 }
 
 var (
 	reaperX32StripMap = map[string]targetTransform{
 		"volume": targetTransform{target: "mix/fader", targetType: x32Strip},
 		"mute": targetTransform{target: "mix/on", targetType: x32Strip,
-			transform: func(m []osc.Message) []osc.Message {
+			transform: func(m []*osc.Message) []*osc.Message {
 				return NotInt(FloatToInt(m))
 			},
 		},
 		"pan": targetTransform{target: "mix/pan", targetType: x32Strip},
 		"select": targetTransform{target: "-stat/selidx", targetType: x32StatWithAddressArg,
-			transform: func(m []osc.Message) []osc.Message {
+			transform: func(m []*osc.Message) []*osc.Message {
 				return DropArgs(FilterUnselect(m))
 			},
 		},
@@ -339,8 +324,7 @@ var (
 //  /track/../select <-> /-stat/selidx
 //  /track/../solo <-> /-stat/solosw
 
-func (p *Proxy) buildReaperDispatcher() osc.Dispatcher {
-	r := make(osc.Dispatcher)
+func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 
 	for rPfx, xTarget := range p.mapping.reaper {
 		rPfx := rPfx
@@ -352,42 +336,39 @@ func (p *Proxy) buildReaperDispatcher() osc.Dispatcher {
 			case x32Strip:
 				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
 				x32Addr := fmt.Sprintf("/%s/%s", xTarget.strip, tt.target)
-				r[reaAddr] = osc.Method(func(msg osc.Message) error {
+				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
 					glog.Infof("R-> %s %v", reaAddr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
 						x32Msg.Address = x32Addr
 						if err := p.x32Client.Send(x32Msg); err != nil {
-							return err
+							glog.Errorf("Failed to send message to X32: %s", err)
 						}
 					}
-					return nil
 				})
 			case x32Stat:
 				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
 				x32Addr := fmt.Sprintf("/%s/%02d", tt.target, xTarget.statIndex)
-				r[reaAddr] = osc.Method(func(msg osc.Message) error {
+				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
 					glog.Infof("R-> %s %v", reaAddr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
 						x32Msg.Address = x32Addr
 						if err := p.x32Client.Send(x32Msg); err != nil {
-							return err
+							glog.Errorf("Failed to send message to X32: %s", err)
 						}
 					}
-					return nil
 				})
 			case x32StatWithAddressArg:
 				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
 				x32Addr := fmt.Sprintf("/%s", tt.target)
-				r[reaAddr] = osc.Method(func(msg osc.Message) error {
+				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
 					glog.Infof("R-> %s %v", reaAddr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
-						x32Msg.Arguments = append([]osc.Argument{osc.Int(xTarget.statIndex)}, x32Msg.Arguments...)
+						x32Msg.Arguments = append([]interface{}{int32(xTarget.statIndex - 1)}, x32Msg.Arguments...)
 						x32Msg.Address = x32Addr
 						if err := p.x32Client.Send(x32Msg); err != nil {
-							return err
+							glog.Errorf("Failed to send message to X32: %s", err)
 						}
 					}
-					return nil
 				})
 
 			default:
@@ -395,12 +376,5 @@ func (p *Proxy) buildReaperDispatcher() osc.Dispatcher {
 			}
 		}
 	}
-	r[""] = osc.Method(func(msg osc.Message) error {
-		glog.Infof("R?-> %v", msg.Address)
-		return nil
-	})
-
-	glog.Infof("R-> mapping:\n%#v", r)
-
-	return r
+	return nil
 }
