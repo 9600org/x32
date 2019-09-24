@@ -102,8 +102,8 @@ var validX32MappingTypes = map[string]int{
 	"bus":     48,
 	"dca":     72,
 	"mtx":     64,
-	"mainMid": 70,
-	"mainLR":  71,
+	"main/m":  70,
+	"main/st": 71,
 	"auxin":   32,
 	"usb":     38,
 	"fxrtn":   40,
@@ -115,26 +115,49 @@ func buildMapping(conf map[string]string) (*mapping, error) {
 		x32:    make(map[string]reaperTarget),
 	}
 	for k, v := range conf {
-		reaTrack := strings.Split(k, "/")
+		var x32Track, reaTrack []string
+		var x32Lo, x32Hi, reaLo, reaHi int
+		var err error
+
+		switch v {
+		case "main/st", "main/m":
+			x32Track = []string{v}
+		default:
+			x32Track = strings.Split(v, "/")
+			x32Lo, x32Hi, err = parseRange(x32Track[1])
+			if err != nil && x32Track[0] != "main" {
+				return nil, err
+			}
+		}
+		x32StatIndexBase, ok := validX32MappingTypes[x32Track[0]]
+		if !ok {
+			return nil, fmt.Errorf("invalid x32 mapping type %s", x32Track[0])
+		}
+
+		switch k {
+		case "master":
+			if x32Lo != x32Hi {
+				return nil, fmt.Errorf("mapping for /master should have 1 target, got %d", (x32Hi - x32Lo + 1))
+			}
+			x32K := x32Track[0]
+			if x32Lo > 0 {
+				x32K = fmt.Sprintf("%s/%02d", x32Track[0], x32Lo)
+			}
+			ret.reaper[k] = x32Target{strip: x32K, statIndex: x32StatIndexBase + x32Lo}
+			ret.x32[x32K] = reaperTarget{track: k}
+			continue
+		default:
+			reaTrack = strings.Split(k, "/")
+			reaLo, reaHi, err = parseRange(reaTrack[1])
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := isReaperType(reaTrack[0]); err != nil {
 			return nil, err
 		}
 
-		// TODO: fix master
-
-		reaLo, reaHi, err := parseRange(reaTrack[1])
-		if err != nil {
-			return nil, err
-		}
-		x32Track := strings.Split(v, "/")
-		x32StatIndexBase, ok := validX32MappingTypes[x32Track[0]]
-		if !ok {
-			return nil, err
-		}
-		x32Lo, x32Hi, err := parseRange(x32Track[1])
-		if err != nil {
-			return nil, err
-		}
+		// Handle all other mappings:
 		if reaSpan, x32Span := reaHi-reaLo+1, x32Hi-x32Lo+1; reaSpan != x32Span {
 			return nil, fmt.Errorf("invalid mapping - reaper range %d != x32 range %d", reaSpan, x32Span)
 		}
