@@ -42,6 +42,16 @@ type mapping struct {
 	x32    map[string]reaperTarget
 }
 
+type x32Target struct {
+	stripPrefix     string
+	statIndex int
+}
+
+type reaperTarget struct {
+	trackPrefix string
+}
+
+
 var colours = map[string]int{
 	"OFF":  0,
 	"RD":   1,
@@ -85,15 +95,6 @@ func newNameHint(m, hint string) (*nameHint, error) {
 		ret.colour = colours[hintBits[1]]
 	}
 	return ret, nil
-}
-
-type x32Target struct {
-	strip     string
-	statIndex int
-}
-
-type reaperTarget struct {
-	track string
 }
 
 func splitAddress(a string) (string, int, error) {
@@ -193,8 +194,8 @@ func buildMapping(conf map[string]string) (*mapping, error) {
 			if x32Lo > 0 {
 				x32K = fmt.Sprintf("%s/%02d", x32Track[0], x32Lo)
 			}
-			ret.reaper[k] = x32Target{strip: x32K, statIndex: x32StatIndexBase + x32Lo}
-			ret.x32[x32K] = reaperTarget{track: k}
+			ret.reaper[k] = x32Target{stripPrefix: x32K, statIndex: x32StatIndexBase + x32Lo}
+			ret.x32[x32K] = reaperTarget{trackPrefix: k}
 			continue
 		default:
 			reaTrack = strings.Split(k, "/")
@@ -221,8 +222,8 @@ func buildMapping(conf map[string]string) (*mapping, error) {
 			if _, ok := ret.x32[x32K]; ok {
 				return nil, fmt.Errorf("duplicate mapping for %s", x32K)
 			}
-			ret.reaper[reaK] = x32Target{strip: x32K, statIndex: x32StatIndexBase + x32N}
-			ret.x32[x32K] = reaperTarget{track: reaK}
+			ret.reaper[reaK] = x32Target{stripPrefix: x32K, statIndex: x32StatIndexBase + x32N}
+			ret.x32[x32K] = reaperTarget{trackPrefix: reaK}
 		}
 	}
 	return &ret, nil
@@ -537,7 +538,7 @@ func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 			switch tt.targetType {
 			case x32Strip:
 				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
-				x32Addr := fmt.Sprintf("/%s/%s", xTarget.strip, tt.target)
+				x32Addr := fmt.Sprintf("/%s/%s", xTarget.stripPrefix, tt.target)
 				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
 					glog.V(1).Infof("R-> %s %v", reaAddr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
@@ -593,7 +594,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 			switch tt.targetType {
 			case reaperTrack:
 				x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
-				reaAddr := fmt.Sprintf("/%s/%s", rTarget.track, tt.target)
+				reaAddr := fmt.Sprintf("/%s/%s", rTarget.trackPrefix, tt.target)
 				glog.Infof("Listen on %s", x32Addr)
 				d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
 					glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
@@ -614,7 +615,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 			switch tt.targetType {
 			case reaperTrack:
 				x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
-				reaAddr := fmt.Sprintf("/%s/%s", rTarget.track, tt.target)
+				reaAddr := fmt.Sprintf("/%s/%s", rTarget.trackPrefix, tt.target)
 				d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
 					glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
 					for _, x32Msg := range tt.Apply(msg) {
