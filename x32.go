@@ -365,11 +365,10 @@ const (
 )
 
 type targetTransform struct {
-	targetType TargetType
-	target     string
-	transform  func(*targetTransform, mapping, osc.Message) ([]osc.Message, error)
-	trackMap   *trackMap
-	nameHints  []nameHint
+	target    string
+	transform func(*targetTransform, mapping, osc.Message) ([]osc.Message, error)
+	trackMap  *trackMap
+	nameHints []nameHint
 }
 
 func FloatToInt(a interface{}) (int32, error) {
@@ -445,13 +444,13 @@ var (
 	// reaperX32StripMap is a map of all /track/${ID}/... subaddresses which
 	// are sent by Reaper, and their corresponding X32 targets.
 	reaperX32StripMap = map[string]targetTransform{
-		"volume": targetTransform{target: "mix/fader", targetType: x32Strip,
+		"volume": targetTransform{target: "mix/fader",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"mute": targetTransform{target: "mix/on", targetType: x32Strip,
+		"mute": targetTransform{target: "mix/on",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				f, ok := msg.Arguments[0].(float32)
 				if !ok {
@@ -466,13 +465,13 @@ var (
 				return []osc.Message{msg}, nil
 			},
 		},
-		"pan": targetTransform{target: "mix/pan", targetType: x32Strip,
+		"pan": targetTransform{target: "mix/pan",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"select": targetTransform{target: "-stat/selidx", targetType: x32StatWithAddressArg,
+		"select": targetTransform{target: "-stat/selidx",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				eq, err := isArgEq(msg, 0, float32(0))
 				if err != nil {
@@ -486,7 +485,7 @@ var (
 				return []osc.Message{msg}, nil
 			},
 		},
-		"solo": targetTransform{target: "-stat/solosw", targetType: x32Stat,
+		"solo": targetTransform{target: "-stat/solosw",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("got %d arguments, expected 1", l)
@@ -500,7 +499,7 @@ var (
 				return []osc.Message{msg}, nil
 			},
 		},
-		"name": targetTransform{target: "config/name", targetType: x32Strip,
+		"name": targetTransform{target: "config/name",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				name, ok := msg.Arguments[0].(string)
 				if !ok {
@@ -538,7 +537,7 @@ var (
 
 	// reaperX32StripFXMap contains mappings for reaper FX messages
 	reaperX32StripFXMap = map[string]targetTransform{
-		"fxeq/band/%d/bypass": targetTransform{target: "fx/%d/eq/on", targetType: reaperTrack,
+		"fxeq/band/%d/bypass": targetTransform{target: "fx/%d/eq/on",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("%s: got %d arguments, expected 1", tt.target, l)
@@ -552,25 +551,25 @@ var (
 				return []osc.Message{msg}, nil
 			},
 		},
-		"fxeq/band/%d/type": targetTransform{target: "eq/%d/type", targetType: reaperTrack,
+		"fxeq/band/%d/type": targetTransform{target: "eq/%d/type",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"fxeq/band/%d/q/oct": targetTransform{target: "eq/%d/q", targetType: reaperTrack,
+		"fxeq/band/%d/q/oct": targetTransform{target: "eq/%d/q",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"fxeq/band/%d/f/hz": targetTransform{target: "eq/%d/f", targetType: reaperTrack,
+		"fxeq/band/%d/f/hz": targetTransform{target: "eq/%d/f",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"fxeq/band/%d/g/db": targetTransform{target: "eq/%d/g", targetType: reaperTrack,
+		"fxeq/band/%d/g/db": targetTransform{target: "eq/%d/g",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
@@ -581,13 +580,13 @@ var (
 	// x32eaperStripMap is a map of all addresses which
 	// are sent by Reaper, and their corresponding X32 targets.
 	x32ReaperStripMap = map[string]targetTransform{
-		"mix/fader": targetTransform{target: "volume", targetType: reaperTrack,
+		"mix/fader": targetTransform{target: "volume",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"mix/on": targetTransform{target: "mute", targetType: reaperTrack,
+		"mix/on": targetTransform{target: "mute",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				i, err := NotInt(msg.Arguments[0])
 				if err != nil {
@@ -607,7 +606,7 @@ var (
 				return []osc.Message{msg}, nil
 			},
 		},
-		"mix/pan": targetTransform{target: "pan", targetType: reaperTrack,
+		"mix/pan": targetTransform{target: "pan",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
@@ -617,7 +616,7 @@ var (
 
 	// x32ReaperStripFXMap contains mappings for x32 FX messages
 	x32ReaperStripFXMap = map[string]targetTransform{
-		"eq/%d/on": targetTransform{target: "fxeq/band/%d/bypass", targetType: reaperTrack,
+		"eq/%d/on": targetTransform{target: "fxeq/band/%d/bypass",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("%s: got %d arguments, expected 1", tt.target, l)
@@ -631,25 +630,25 @@ var (
 				return []osc.Message{msg}, nil
 			},
 		},
-		"eq/%d/type": targetTransform{target: "fxeq/band/%d/type", targetType: reaperTrack,
+		"eq/%d/type": targetTransform{target: "fxeq/band/%d/type",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"eq/%d/q": targetTransform{target: "fxeq/band/%d/q/oct", targetType: reaperTrack,
+		"eq/%d/q": targetTransform{target: "fxeq/band/%d/q/oct",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"eq/%d/f": targetTransform{target: "fxeq/band/%d/freq/hz", targetType: reaperTrack,
+		"eq/%d/f": targetTransform{target: "fxeq/band/%d/freq/hz",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"eq/%d/g": targetTransform{target: "fxeq/band/%d/gain/db", targetType: reaperTrack,
+		"eq/%d/g": targetTransform{target: "fxeq/band/%d/gain/db",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
@@ -658,7 +657,7 @@ var (
 	}
 
 	x32ReaperStatMap = map[string]targetTransform{
-		"-stat/solosw": targetTransform{target: "solo", targetType: reaperTrack,
+		"-stat/solosw": targetTransform{target: "solo",
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("unexpected number of arguments (%d), expected 1", l)
@@ -685,7 +684,7 @@ var (
 	}
 
 	x32ReaperFanoutStatMap = map[string]targetTransform{
-		"-stat/selidx": targetTransform{target: "select", targetType: reaperTrackFromArg,
+		"-stat/selidx": targetTransform{target: "select",
 			transform: func(tt *targetTransform, _ mapping, msg osc.Message) ([]osc.Message, error) {
 				id, ok := msg.Arguments[0].(int32)
 				if !ok {
