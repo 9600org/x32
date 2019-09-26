@@ -491,7 +491,7 @@ var (
 
 				colID := int32(-1)
 				iconID := int32(-1)
-				if len(name) == 0 {
+				if len(strings.TrimSpace(name)) == 0 {
 					colID = 0
 					iconID = 0
 				} else {
