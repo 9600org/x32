@@ -529,6 +529,48 @@ var (
 		},
 	}
 
+	// reaperX32StripFXMap contains mappings for reaper FX messages
+	reaperX32StripFXMap = map[string]targetTransform{
+		"fxeq/band/%d/bypass": targetTransform{target: "fx/%d/eq/on", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				if l := len(msg.Arguments); l != 1 {
+					return nil, fmt.Errorf("%s: got %d arguments, expected 1", tt.target, l)
+				}
+				i, ok := msg.Arguments[0].(int32)
+				if !ok {
+					return nil, fmt.Errorf("%s: got %T argument, expected int32", tt.target, i)
+				}
+				msg.Arguments[0] = i ^ 1
+				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"fxeq/band/%d/type": targetTransform{target: "eq/%d/type", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"fxeq/band/%d/q/oct": targetTransform{target: "eq/%d/q", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"fxeq/band/%d/f/hz": targetTransform{target: "eq/%d/f", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"fxeq/band/%d/g/db": targetTransform{target: "eq/%d/g", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+	}
+
 	// x32eaperStripMap is a map of all addresses which
 	// are sent by Reaper, and their corresponding X32 targets.
 	x32ReaperStripMap = map[string]targetTransform{
@@ -559,6 +601,48 @@ var (
 			},
 		},
 		"mix/pan": targetTransform{target: "pan", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+	}
+
+	// x32ReaperStripFXMap contains mappings for x32 FX messages
+	x32ReaperStripFXMap = map[string]targetTransform{
+		"eq/%d/on": targetTransform{target: "fxeq/band/%d/bypass", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				if l := len(msg.Arguments); l != 1 {
+					return nil, fmt.Errorf("%s: got %d arguments, expected 1", tt.target, l)
+				}
+				i, ok := msg.Arguments[0].(int32)
+				if !ok {
+					return nil, fmt.Errorf("%s: got %T argument, expected int32", tt.target, i)
+				}
+				msg.Arguments[0] = i ^ 1
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"eq/%d/type": targetTransform{target: "fxeq/band/%d/type", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"eq/%d/q": targetTransform{target: "fxeq/band/%d/q/oct", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"eq/%d/f": targetTransform{target: "fxeq/band/%d/freq/hz", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"eq/%d/g": targetTransform{target: "fxeq/band/%d/gain/db", targetType: reaperTrack,
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
@@ -678,6 +762,30 @@ func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 				p.sendMessagesToX32(msgs)
 			})
 		}
+
+		for fxAddr, ttFxTemplate := range reaperX32StripFXMap {
+			fxAddr := fxAddr
+
+			reaFxAddrTemplate := fmt.Sprintf("/%s/%s", rPfx, fxAddr)
+			// TODO: 4 for most things, 6 for bus
+			for i := 1; i <= 6; i++ {
+				ttFx := ttFxTemplate
+				ttFx.target = fmt.Sprintf(ttFx.target, i)
+				reaFxAddr := fmt.Sprintf(reaFxAddrTemplate, i)
+				glog.Infof("listen: %s", reaFxAddr)
+				err := d.AddMsgHandler(reaFxAddr, func(msg *osc.Message) {
+					msgs, err := ttFx.Apply(mapping, *msg)
+					if err != nil {
+						glog.Errorf("%s: failed to handle message: %v", reaFxAddr, err)
+						return
+					}
+					p.sendMessagesToReaper(msgs)
+				})
+				if err != nil {
+					glog.Errorf("%s: failed to add handler: %v", reaFxAddr, err)
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -704,6 +812,30 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 				}
 				p.sendMessagesToReaper(msgs)
 			})
+		}
+
+		for fxAddr, ttFxTemplate := range x32ReaperStripFXMap {
+			fxAddr := fxAddr
+
+			x32FxAddrTemplate := fmt.Sprintf("/%s/%s", xPfx, fxAddr)
+			// TODO: 4 for most things, 6 for bus
+			for i := 1; i <= 6; i++ {
+				ttFx := ttFxTemplate
+				ttFx.target = fmt.Sprintf(ttFx.target, i)
+				x32FxAddr := fmt.Sprintf(x32FxAddrTemplate, i)
+				glog.Infof("listen: %s", x32FxAddr)
+				err := d.AddMsgHandler(x32FxAddr, func(msg *osc.Message) {
+					msgs, err := ttFx.Apply(mapping, *msg)
+					if err != nil {
+						glog.Errorf("%s: failed to handle message: %v", x32FxAddr, err)
+						return
+					}
+					p.sendMessagesToReaper(msgs)
+				})
+				if err != nil {
+					glog.Errorf("%s: failed to add handler: %v", x32FxAddr, err)
+				}
+			}
 		}
 
 		// Stat addresses
