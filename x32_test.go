@@ -54,8 +54,8 @@ func TestParrseRange(t *testing.T) {
 		desc    string
 		r       string
 		wantErr bool
-		wantLo  int
-		wantHi  int
+		wantLo  int32
+		wantHi  int32
 	}{
 		{
 			desc:   "ValidSingle",
@@ -109,38 +109,3 @@ func TestIsReaperType(t *testing.T) {
 	}
 }
 
-func TestIsX32Type(t *testing.T) {
-	for _, test := range []struct {
-		t       string
-		wantErr bool
-	}{
-		{
-			t: "ch",
-		}, {
-			t: "bus",
-		}, {
-			t: "dca",
-		}, {
-			t: "mtx",
-		}, {
-			t: "main",
-		}, {
-			t: "auxin",
-		}, {
-			t: "fxrtn",
-		}, {
-			t:       "bananas",
-			wantErr: true,
-		},
-	} {
-		t.Run(test.t, func(t *testing.T) {
-			gotErr := isX32Type(test.t)
-			if test.wantErr && gotErr != nil {
-				return
-			}
-			if gotErr != nil {
-				t.Fatalf("Got unexpected error %s, want no error", gotErr)
-			}
-		})
-	}
-}
