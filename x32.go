@@ -401,52 +401,6 @@ func NotInt(a interface{}) (int32, error) {
 	return v, nil
 }
 
-func DropArgs(tt *targetTransform, m []osc.Message) []osc.Message {
-	for i := range m {
-		m[i].Arguments = nil
-	}
-	return m
-}
-
-func FilterUnselect(tt *targetTransform, m []osc.Message) []osc.Message {
-	ret := make([]osc.Message, 0, len(m))
-	for mi := range m {
-		if len(m[mi].Arguments) == 1 {
-			f, ok := m[mi].Arguments[0].(float32)
-			if !ok {
-				glog.Errorf("Attempting to read float from %T failed", m[mi].Arguments[0])
-			} else {
-				if f == 0 {
-					continue
-				}
-			}
-		}
-		ret = append(ret, m[mi])
-	}
-	return ret
-}
-
-func GuessIconAndColour(tt *targetTransform, m []osc.Message) []osc.Message {
-	ret := make([]osc.Message, 0, len(m)*3)
-	for _, msg := range m {
-		if l := len(msg.Arguments); l != 1 {
-			glog.Errorf("Expected name message to have 1 arg, got %d", l)
-			continue
-		}
-		name, ok := msg.Arguments[0].(string)
-		if !ok {
-			glog.Errorf("Expected name message argument to be string, found %T", msg.Arguments[0])
-			continue
-		}
-		ret = append(ret, msg)
-
-		//TODO: guess
-		_ = name
-
-	}
-	return ret
-}
-
 func isArgEq(m osc.Message, idx int, v interface{}) (bool, error) {
 	if l := len(m.Arguments); l <= idx {
 		return false, fmt.Errorf("message has %d arguments, can't get argument %d", l, idx)
