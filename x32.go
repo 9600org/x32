@@ -778,7 +778,6 @@ func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 				ttFx := ttFxTemplate
 				ttFx.target = fmt.Sprintf(ttFx.target, i)
 				reaFxAddr := fmt.Sprintf(reaFxAddrTemplate, i)
-				glog.Infof("listen: %s", reaFxAddr)
 				err := d.AddMsgHandler(reaFxAddr, func(msg *osc.Message) {
 					msgs, err := ttFx.Apply(mapping, *msg)
 					if err != nil {
@@ -829,7 +828,6 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 				ttFx := ttFxTemplate
 				ttFx.target = fmt.Sprintf(ttFx.target, i)
 				x32FxAddr := fmt.Sprintf(x32FxAddrTemplate, i)
-				glog.Infof("listen: %s", x32FxAddr)
 				err := d.AddMsgHandler(x32FxAddr, func(msg *osc.Message) {
 					msgs, err := ttFx.Apply(mapping, *msg)
 					if err != nil {
