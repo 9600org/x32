@@ -51,7 +51,7 @@ type mapping struct {
 	x32StatIndex     int32
 }
 
-var colours = map[string]int{
+var colours = map[string]int32{
 	"OFF":  0,
 	"RD":   1,
 	"GN":   2,
@@ -72,23 +72,24 @@ var colours = map[string]int{
 
 type nameHint struct {
 	matcher *regexp.Regexp
-	icon    int
-	colour  int
+	icon    int32
+	colour  int32
 }
 
 func newNameHint(m, hint string) (*nameHint, error) {
-	ret := &nameHint{}
+	ret := &nameHint{nil, -1, -1}
 	var err error
-	ret.matcher, err = regexp.Compile(m)
+	ret.matcher, err = regexp.Compile(strings.ToLower(m))
 	if err != nil {
 		return nil, err
 	}
 	hintBits := strings.Split(hint, " ")
 	if len(hintBits) >= 1 {
-		ret.icon, err = strconv.Atoi(hintBits[0])
+		icon, err := strconv.Atoi(hintBits[0])
 		if err != nil {
 			return nil, err
 		}
+		ret.icon = int32(icon)
 	}
 	if len(hintBits) == 2 {
 		ret.colour = colours[hintBits[1]]
@@ -368,6 +369,7 @@ type targetTransform struct {
 	target     string
 	transform  func(*targetTransform, mapping, osc.Message) ([]osc.Message, error)
 	trackMap   *trackMap
+	nameHints  []nameHint
 }
 
 func FloatToInt(a interface{}) (int32, error) {
@@ -524,9 +526,48 @@ var (
 				// pass on name setting
 				r = append(r,
 					osc.Message{
-						Address:   fmt.Sprintf("/%s/%02d", m.x32Prefix, m.x32StatIndex),
+						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target),
 						Arguments: msg.Arguments,
 					})
+
+				name, ok := msg.Arguments[0].(string)
+				if !ok {
+					return nil, fmt.Errorf("got %T arg, expected string", msg.Arguments[0])
+				}
+
+				colID := int32(-1)
+				iconID := int32(-1)
+				if len(name) == 0 {
+					colID = 0
+					iconID = 0
+				} else {
+					for _, hint := range tt.nameHints {
+						if hint.matcher.Match([]byte(strings.ToLower(name))) {
+							if colID == -1 && hint.colour > -1 {
+								colID = hint.colour
+							}
+							if iconID == -1 && hint.icon > -1 {
+								iconID = hint.icon
+							}
+							if colID > -1 && iconID > -1 {
+								break
+							}
+						}
+					}
+				}
+
+				if colID > -1 {
+					r = append(r, osc.Message{
+						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, "config/color"),
+						Arguments: []interface{}{colID},
+					})
+				}
+				if iconID > -1 {
+					r = append(r, osc.Message{
+						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, "config/icon"),
+						Arguments: []interface{}{iconID},
+					})
+				}
 
 				// do guessing thing
 				return r, nil
@@ -638,6 +679,12 @@ var (
 //  /track/../select <-> /-stat/selidx
 //  /track/../solo <-> /-stat/solosw
 
+// FX:
+// /ch/01/eq/1/type i
+// /ch/01/eq/1/g f
+// /ch/01/eq/1/q f
+// /ch/01/eq/1/f f
+
 func (p *Proxy) sendMessagesToX32(msgs []osc.Message) {
 	for _, m := range msgs {
 		glog.V(1).Infof("->X %s %v", m.Address, m.Arguments)
@@ -664,6 +711,7 @@ func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
 			rSfx := rSfx
 			tt := tt
 			tt.trackMap = &p.trackMap
+			tt.nameHints = p.nameHints
 
 			reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
 			d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
@@ -690,6 +738,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 			xSfx := xSfx
 			tt := tt
 			tt.trackMap = &p.trackMap
+			tt.nameHints = p.nameHints
 
 			x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
 			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
@@ -708,6 +757,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 			xStat := xStat
 			tt := tt
 			tt.trackMap = &p.trackMap
+			tt.nameHints = p.nameHints
 
 			x32Addr := fmt.Sprintf("/%s/%02d", xStat, mapping.x32StatIndex)
 			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
@@ -730,6 +780,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 		xStat := xStat
 		tt := tt
 		tt.trackMap = &p.trackMap
+		tt.nameHints = p.nameHints
 
 		x32Addr := fmt.Sprintf("/%s", xStat)
 		d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
@@ -743,7 +794,7 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 		})
 	}
 
-	d.AddMsgHandler("", func(msg *osc.Message) {
+	d.AddMsgHandler("/", func(msg *osc.Message) {
 		glog.V(1).Infof("Unhandled X-> %s %v", msg.Address, msg.Arguments)
 	})
 	return nil
