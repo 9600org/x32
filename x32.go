@@ -354,16 +354,6 @@ func (p *Proxy) ListenAndServe() error {
 	return errGroup.Wait()
 }
 
-type TargetType int
-
-const (
-	reaperTrack           TargetType = iota
-	reaperTrackFromArg               = iota
-	x32Strip                         = iota
-	x32Stat                          = iota
-	x32StatWithAddressArg            = iota
-)
-
 type targetTransform struct {
 	target    string
 	transform func(*targetTransform, mapping, osc.Message) ([]osc.Message, error)
