@@ -225,7 +225,7 @@ func buildTrackMap(conf map[string]string) (*trackMap, error) {
 			if _, ok := ret.x32[x32K]; ok {
 				return nil, fmt.Errorf("duplicate mapping for %s", x32K)
 			}
-			x32StatIndex := x32StatIndexBase + x32N
+			x32StatIndex := x32StatIndexBase + x32N - 1
 			mapping := mapping{x32Prefix: x32K, x32StatIndex: x32StatIndex, reaperPrefix: reaK, reaperTrackIndex: reaN}
 			ret.reaper[reaK] = mapping
 			ret.x32[x32K] = mapping
@@ -370,26 +370,26 @@ type targetTransform struct {
 	trackMap   *trackMap
 }
 
-func FloatToInt(a interface{}) (interface{}, error) {
+func FloatToInt(a interface{}) (int32, error) {
 	f, ok := a.(float32)
 	if !ok {
-		return nil, fmt.Errorf("failed to convert argument type %T to float32", a)
+		return 0, fmt.Errorf("failed to convert argument type %T to float32", a)
 	}
 	return int32(f), nil
 }
 
-func IntToFloat(a interface{}) (interface{}, error) {
+func IntToFloat(a interface{}) (float32, error) {
 	i, ok := a.(int32)
 	if !ok {
-		return nil, fmt.Errorf("456456 failed to convert argument type %T to int32", a)
+		return 0, fmt.Errorf("456456 failed to convert argument type %T to int32", a)
 	}
 	return float32(i), nil
 }
 
-func NotInt(a interface{}) (interface{}, error) {
+func NotInt(a interface{}) (int32, error) {
 	v, ok := a.(int32)
 	if !ok {
-		return nil, fmt.Errorf("failed to convert argument type %T to int32", a)
+		return 0, fmt.Errorf("failed to convert argument type %T to int32", a)
 	}
 	if v == 0 {
 		v = 1
@@ -514,7 +514,7 @@ var (
 					return nil, fmt.Errorf("got %T arg, expected float32", msg.Arguments[0])
 				}
 				msg.Arguments[0] = int32(f)
-				msg.Address = fmt.Sprintf("/%s/%02d", tt.target, m.x32StatIndex+1)
+				msg.Address = fmt.Sprintf("/%s/%02d", tt.target, m.x32StatIndex)
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -554,7 +554,12 @@ var (
 					return nil, err
 				}
 				msg.Arguments[0] = f
-				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				if m.reaperPrefix != "master" {
+					msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				} else {
+					msg.Address = "/action/18"
+					msg.Arguments[0] = i
+				}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -584,6 +589,7 @@ var (
 				if err != nil {
 					return nil, fmt.Errorf("failed to parse statID from address[2] (%s): %s", msg.Address, err)
 				}
+				statID--
 				msg.Arguments[0] = float32(i)
 				time.Sleep(time.Second)
 				msg.Address = fmt.Sprintf("/%s/%s", tt.trackMap.x32StatIndex[int32(statID)].reaperPrefix, tt.target)
@@ -736,5 +742,9 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 			p.sendMessagesToReaper(msgs)
 		})
 	}
+
+	d.AddMsgHandler("", func(msg *osc.Message) {
+		glog.V(1).Infof("Unhandled X-> %s %v", msg.Address, msg.Arguments)
+	})
 	return nil
 }
