@@ -3,6 +3,7 @@ package x32
 import (
 	"fmt"
 	"net"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,27 +31,23 @@ type Proxy struct {
 	x32Client    Client
 	x32ServeConn net.PacketConn
 
-	mapping mapping
+	trackMap trackMap
 
 	nameHints []nameHint
 
 	dispatcher osc.Dispatcher
 }
 
+type trackMap struct {
+	reaper map[string]mapping
+	x32    map[string]mapping
+}
+
 type mapping struct {
-	reaper map[string]x32Target
-	x32    map[string]reaperTarget
+	reaperPrefix string
+	x32Prefix    string
+	x32StatIndex int
 }
-
-type x32Target struct {
-	stripPrefix     string
-	statIndex int
-}
-
-type reaperTarget struct {
-	trackPrefix string
-}
-
 
 var colours = map[string]int{
 	"OFF":  0,
@@ -160,10 +157,10 @@ var validX32MappingTypes = map[string]int{
 	"fxrtn":   40,
 }
 
-func buildMapping(conf map[string]string) (*mapping, error) {
-	ret := mapping{
-		reaper: make(map[string]x32Target),
-		x32:    make(map[string]reaperTarget),
+func buildTrackMap(conf map[string]string) (*trackMap, error) {
+	ret := trackMap{
+		reaper: make(map[string]mapping),
+		x32:    make(map[string]mapping),
 	}
 	for k, v := range conf {
 		var x32Track, reaTrack []string
@@ -194,8 +191,9 @@ func buildMapping(conf map[string]string) (*mapping, error) {
 			if x32Lo > 0 {
 				x32K = fmt.Sprintf("%s/%02d", x32Track[0], x32Lo)
 			}
-			ret.reaper[k] = x32Target{stripPrefix: x32K, statIndex: x32StatIndexBase + x32Lo}
-			ret.x32[x32K] = reaperTarget{trackPrefix: k}
+			mapping := mapping{x32Prefix: x32K, x32StatIndex: x32StatIndexBase + x32Lo, reaperPrefix: k}
+			ret.reaper[k] = mapping
+			ret.x32[x32K] = mapping
 			continue
 		default:
 			reaTrack = strings.Split(k, "/")
@@ -222,8 +220,9 @@ func buildMapping(conf map[string]string) (*mapping, error) {
 			if _, ok := ret.x32[x32K]; ok {
 				return nil, fmt.Errorf("duplicate mapping for %s", x32K)
 			}
-			ret.reaper[reaK] = x32Target{stripPrefix: x32K, statIndex: x32StatIndexBase + x32N}
-			ret.x32[x32K] = reaperTarget{trackPrefix: reaK}
+			mapping := mapping{x32Prefix: x32K, x32StatIndex: x32StatIndexBase + x32N, reaperPrefix: reaK}
+			ret.reaper[reaK] = mapping
+			ret.x32[x32K] = mapping
 		}
 	}
 	return &ret, nil
@@ -289,7 +288,7 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 	}
 	rClient := Client{rClientConn}
 
-	mapping, err := buildMapping(config.Mapping)
+	trackMap, err := buildTrackMap(config.Mapping)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +304,7 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 		x32Server:    xServer,
 		x32Client:    xClient,
 		x32ServeConn: xServerConn,
-		mapping:      *mapping,
+		trackMap:     *trackMap,
 		nameHints:    nameHints,
 	}
 
@@ -360,65 +359,47 @@ const (
 type targetTransform struct {
 	targetType TargetType
 	target     string
-	transform  func([]*osc.Message) []*osc.Message
+	transform  func(*targetTransform, mapping, osc.Message) ([]osc.Message, error)
 }
 
-func FloatToInt(m []*osc.Message) []*osc.Message {
-	for mi := range m {
-		for i, a := range m[mi].Arguments {
-			f, ok := a.(float32)
-			if !ok {
-				glog.Errorf("Attempting to read float32 from %T failed", a)
-				continue
-			}
-			m[mi].Arguments[i] = int32(f)
-		}
+func FloatToInt(a interface{}) (interface{}, error) {
+	f, ok := a.(float32)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert argument type %T to float32", a)
 	}
-	return m
+	return int32(f), nil
 }
 
-func IntToFloat(m []*osc.Message) []*osc.Message {
-	for mi := range m {
-		for i, a := range m[mi].Arguments {
-			f, ok := a.(int32)
-			if !ok {
-				glog.Errorf("Attempting to read int32 from %T failed", a)
-				continue
-			}
-			m[mi].Arguments[i] = float32(f)
-		}
+func IntToFloat(a interface{}) (interface{}, error) {
+	i, ok := a.(int32)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert argument type %T to int32", a)
 	}
-	return m
+	return float32(i), nil
 }
 
-func NotInt(m []*osc.Message) []*osc.Message {
-	for mi := range m {
-		for i, a := range m[mi].Arguments {
-			v, ok := a.(int32)
-			if !ok {
-				glog.Errorf("Attempting to read int32 from %T failed", a)
-				continue
-			}
-			if v == 0 {
-				v = 1
-			} else {
-				v = 0
-			}
-			m[mi].Arguments[i] = int32(v)
-		}
+func NotInt(a interface{}) (interface{}, error) {
+	v, ok := a.(int32)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert argument type %T to int32", a)
 	}
-	return m
+	if v == 0 {
+		v = 1
+	} else {
+		v = 0
+	}
+	return v, nil
 }
 
-func DropArgs(m []*osc.Message) []*osc.Message {
+func DropArgs(tt *targetTransform, m []osc.Message) []osc.Message {
 	for i := range m {
 		m[i].Arguments = nil
 	}
 	return m
 }
 
-func FilterUnselect(m []*osc.Message) []*osc.Message {
-	ret := make([]*osc.Message, 0, len(m))
+func FilterUnselect(tt *targetTransform, m []osc.Message) []osc.Message {
+	ret := make([]osc.Message, 0, len(m))
 	for mi := range m {
 		if len(m[mi].Arguments) == 1 {
 			f, ok := m[mi].Arguments[0].(float32)
@@ -435,8 +416,8 @@ func FilterUnselect(m []*osc.Message) []*osc.Message {
 	return ret
 }
 
-func GuessIconAndColour(m []*osc.Message) []*osc.Message {
-	ret := make([]*osc.Message, 0, len(m)*3)
+func GuessIconAndColour(tt *targetTransform, m []osc.Message) []osc.Message {
+	ret := make([]osc.Message, 0, len(m)*3)
 	for _, msg := range m {
 		if l := len(msg.Arguments); l != 1 {
 			glog.Errorf("Expected name message to have 1 arg, got %d", l)
@@ -456,58 +437,153 @@ func GuessIconAndColour(m []*osc.Message) []*osc.Message {
 	return ret
 }
 
-func (t *targetTransform) Apply(m *osc.Message) []*osc.Message {
-	if t.transform != nil {
-		return t.transform([]*osc.Message{m})
+func isArgEq(m osc.Message, idx int, v interface{}) (bool, error) {
+	if l := len(m.Arguments); l <= idx {
+		return false, fmt.Errorf("message has %d arguments, can't get argument %d", l, idx)
 	}
-	return []*osc.Message{m}
+	if aT, bT := reflect.TypeOf(m.Arguments[idx]), reflect.TypeOf(v); aT != bT {
+		return false, fmt.Errorf("argument type %s != value type %s", aT, bT)
+	}
+	return reflect.DeepEqual(m.Arguments[idx], v), nil
+}
+
+func (tt *targetTransform) Apply(m mapping, msg osc.Message) ([]osc.Message, error) {
+	return tt.transform(tt, m, msg)
 }
 
 var (
 	// reaperX32StripMap is a map of all /track/${ID}/... subaddresses which
 	// are sent by Reaper, and their corresponding X32 targets.
 	reaperX32StripMap = map[string]targetTransform{
-		"volume": targetTransform{target: "mix/fader", targetType: x32Strip},
-		"mute": targetTransform{target: "mix/on", targetType: x32Strip,
-			transform: func(m []*osc.Message) []*osc.Message {
-				return NotInt(FloatToInt(m))
+		"volume": targetTransform{target: "mix/fader", targetType: x32Strip,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
+				return []osc.Message{msg}, nil
 			},
 		},
-		"pan": targetTransform{target: "mix/pan", targetType: x32Strip},
+		"mute": targetTransform{target: "mix/on", targetType: x32Strip,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				i, ok := msg.Arguments[0].(int32)
+				if !ok {
+					return nil, fmt.Errorf("argument 0 is a %T, expected int", msg.Arguments[0])
+				}
+				ni, err := NotInt(i)
+				if err != nil {
+					return nil, err
+				}
+				msg.Arguments[0] = ni
+				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"pan": targetTransform{target: "mix/pan", targetType: x32Strip,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
 		"select": targetTransform{target: "-stat/selidx", targetType: x32StatWithAddressArg,
-			transform: func(m []*osc.Message) []*osc.Message {
-				return DropArgs(FilterUnselect(m))
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				eq, err := isArgEq(msg, 0, float32(0))
+				if err != nil {
+					return nil, err
+				}
+				if eq {
+					return []osc.Message{}, nil
+				}
+				msg.Arguments = []interface{}{int32(m.x32StatIndex - 1)}
+				msg.Address = fmt.Sprintf("/%s", tt.target)
+				return []osc.Message{msg}, nil
 			},
 		},
 		"solo": targetTransform{target: "-stat/solosw", targetType: x32Stat,
-			transform: FloatToInt,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				i, err := FloatToInt(msg.Arguments[0])
+				if err != nil {
+					return nil, err
+				}
+				msg.Arguments[0] = i
+				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
 		},
 		"name": targetTransform{target: "config/name", targetType: x32Strip,
-			transform: GuessIconAndColour,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				r := make([]osc.Message, 0, 3)
+				// pass on name setting
+				r = append(r,
+					osc.Message{
+						Address:   fmt.Sprintf("/%s/%02d", m.x32Prefix, m.x32StatIndex),
+						Arguments: msg.Arguments,
+					})
+
+				// do guessing thing
+				return r, nil
+			},
 		},
 	}
 
 	// x32eaperStripMap is a map of all addresses which
 	// are sent by Reaper, and their corresponding X32 targets.
 	x32ReaperStripMap = map[string]targetTransform{
-		"mix/fader": targetTransform{target: "volume", targetType: reaperTrack},
-		"mix/on": targetTransform{target: "mute", targetType: reaperTrack,
-			transform: func(m []*osc.Message) []*osc.Message {
-				return IntToFloat(NotInt(m))
+		"mix/fader": targetTransform{target: "volume", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
 			},
 		},
-		"mix/pan": targetTransform{target: "pan", targetType: reaperTrack},
+		"mix/on": targetTransform{target: "mute", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				glog.Infof("1")
+				i, err := NotInt(msg.Arguments[0])
+				if err != nil {
+					return nil, err
+				}
+				f, err := IntToFloat(i)
+				if err != nil {
+					return nil, err
+				}
+				msg.Arguments[0] = f
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				glog.Infof("?? %v", msg)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"mix/pan": targetTransform{target: "pan", targetType: reaperTrack,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
+		},
 	}
 
 	x32ReaperStatMap = map[string]targetTransform{
 		"-stat/solosw": targetTransform{target: "solo", targetType: reaperTrack,
-			transform: IntToFloat,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				i, err := IntToFloat(msg.Arguments[0])
+				if err != nil {
+					return nil, err
+				}
+				msg.Arguments[0] = i
+				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				return []osc.Message{msg}, nil
+			},
 		},
 	}
 
 	x32ReaperFanoutStatMap = map[string]targetTransform{
 		"-stat/selidx": targetTransform{target: "select", targetType: reaperTrackFromArg,
-			transform: DropArgs,
+			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
+				//TODO fix this - map id to reaper track
+				id, ok := msg.Arguments[0].(int32)
+				if !ok {
+					return []osc.Message{}, fmt.Errorf("got non-int32 fanout arg[0] of type %T", msg.Arguments[0])
+					return []osc.Message{}, nil
+				}
+				msg.Address = fmt.Sprintf("/track/%02d/%s", id, tt.target)
+				msg.Arguments = []interface{}{}
+				return []osc.Message{msg}, nil
+			},
 		},
 	}
 )
@@ -528,106 +604,84 @@ var (
 //  /track/../select <-> /-stat/selidx
 //  /track/../solo <-> /-stat/solosw
 
+func (p *Proxy) sendMessagesToX32(msgs []osc.Message) {
+	for _, m := range msgs {
+		glog.V(1).Infof("->X %s %v", m.Address, m.Arguments)
+		if err := p.x32Client.Send(&m); err != nil {
+			glog.Errorf("Failed to send message to X32: %s", err)
+		}
+	}
+}
+
+func (p *Proxy) sendMessagesToReaper(msgs []osc.Message) {
+	for _, m := range msgs {
+		glog.V(1).Infof("->R %s %v", m.Address, m.Arguments)
+		if err := p.reaperClient.Send(&m); err != nil {
+			glog.Errorf("Failed to send message to reaper: %s", err)
+		}
+	}
+}
+
 func (p *Proxy) buildReaperDispatcher(d *osc.OscDispatcher) error {
-	for rPfx, xTarget := range p.mapping.reaper {
+	for rPfx, mapping := range p.trackMap.reaper {
 		rPfx := rPfx
-		xTarget := xTarget
+		mapping := mapping
 		for rSfx, tt := range reaperX32StripMap {
 			rSfx := rSfx
 			tt := tt
-			switch tt.targetType {
-			case x32Strip:
-				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
-				x32Addr := fmt.Sprintf("/%s/%s", xTarget.stripPrefix, tt.target)
-				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
-					glog.V(1).Infof("R-> %s %v", reaAddr, msg.Arguments)
-					for _, x32Msg := range tt.Apply(msg) {
-						x32Msg.Address = x32Addr
-						if err := p.x32Client.Send(x32Msg); err != nil {
-							glog.Errorf("Failed to send message to X32: %s", err)
-						}
-					}
-				})
-			case x32Stat:
-				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
-				x32Addr := fmt.Sprintf("/%s/%02d", tt.target, xTarget.statIndex)
-				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
-					glog.V(1).Infof("R-> %s %v", reaAddr, msg.Arguments)
-					for _, x32Msg := range tt.Apply(msg) {
-						x32Msg.Address = x32Addr
-						if err := p.x32Client.Send(x32Msg); err != nil {
-							glog.Errorf("Failed to send message to X32: %s", err)
-						}
-					}
-				})
-			case x32StatWithAddressArg:
-				reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
-				x32Addr := fmt.Sprintf("/%s", tt.target)
-				d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
-					glog.V(1).Infof("R-> %s %v", reaAddr, msg.Arguments)
-					for _, x32Msg := range tt.Apply(msg) {
-						x32Msg.Arguments = append([]interface{}{int32(xTarget.statIndex - 1)}, x32Msg.Arguments...)
-						x32Msg.Address = x32Addr
-						if err := p.x32Client.Send(x32Msg); err != nil {
-							glog.Errorf("Failed to send message to X32: %s", err)
-						}
-					}
-				})
 
-			default:
-				glog.Fatalf("Found unexpected targetType %v", tt.targetType)
-			}
+			reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
+			d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
+				glog.V(1).Infof("R-> %s %v", reaAddr, msg.Arguments)
+				msgs, err := tt.Apply(mapping, *msg)
+				if err != nil {
+					glog.Errorf("Failed to handle message: %v", err)
+					return
+				}
+				p.sendMessagesToX32(msgs)
+			})
 		}
 	}
 	return nil
 }
 
 func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
-	for xPfx, rTarget := range p.mapping.x32 {
+	for xPfx, mapping := range p.trackMap.x32 {
 		xPfx := xPfx
-		rTarget := rTarget
+		mapping := mapping
 
 		// Track addresses
 		for xSfx, tt := range x32ReaperStripMap {
 			xSfx := xSfx
 			tt := tt
-			switch tt.targetType {
-			case reaperTrack:
-				x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
-				reaAddr := fmt.Sprintf("/%s/%s", rTarget.trackPrefix, tt.target)
-				glog.Infof("Listen on %s", x32Addr)
-				d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
-					glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
-					for _, x32Msg := range tt.Apply(msg) {
-						x32Msg.Address = reaAddr
-						if err := p.reaperClient.Send(x32Msg); err != nil {
-							glog.Errorf("Failed to send message to Reaper: %s", err)
-						}
-					}
-				})
-			}
+
+			x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
+			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+				glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
+				msgs, err := tt.Apply(mapping, *msg)
+				if err != nil {
+					glog.Errorf("Failed to handle message: %v", err)
+					return
+				}
+				p.sendMessagesToReaper(msgs)
+			})
 		}
 
 		// Stat addresses
-		for xSfx, tt := range x32ReaperStatMap {
-			xSfx := xSfx
+		for xStat, tt := range x32ReaperStatMap {
+			xStat := xStat
 			tt := tt
-			switch tt.targetType {
-			case reaperTrack:
-				x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
-				reaAddr := fmt.Sprintf("/%s/%s", rTarget.trackPrefix, tt.target)
-				d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
-					glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
-					for _, x32Msg := range tt.Apply(msg) {
-						x32Msg.Address = reaAddr
-						if err := p.reaperClient.Send(x32Msg); err != nil {
-							glog.Errorf("Failed to send message to Reaper: %s", err)
-						}
-					}
-				})
-			default:
-				glog.Fatalf("Found unexpected stat targetType %v", tt.targetType)
-			}
+
+			x32Addr := fmt.Sprintf("/%s/%s", xStat, mapping.x32StatIndex)
+			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+				glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
+				msgs, err := tt.Apply(mapping, *msg)
+				if err != nil {
+					glog.Errorf("Failed to handle message: %v", err)
+					return
+				}
+				p.sendMessagesToReaper(msgs)
+			})
 		}
 	}
 
@@ -635,31 +689,17 @@ func (p *Proxy) buildX32Dispatcher(d *osc.OscDispatcher) error {
 	for xStat, tt := range x32ReaperFanoutStatMap {
 		xStat := xStat
 		tt := tt
-		switch tt.targetType {
-		case reaperTrackFromArg:
-			x32Addr := fmt.Sprintf("/%s", xStat)
-			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
-				glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
-				for _, x32Msg := range tt.Apply(msg) {
-					if len(x32Msg.Arguments) == 0 {
-						glog.Errorf("Got fanout stat message with zero args")
-						continue
-					}
-					id, ok := x32Msg.Arguments[0].(int32)
-					if !ok {
-						glog.Errorf("Got non-int32 fanout arg[0] of type %T", x32Msg.Arguments[0])
-						continue
-					}
-					x32Addr := fmt.Sprintf("/track/%02d/%s", id, tt.target)
-					x32Msg.Address = x32Addr
-					if err := p.reaperClient.Send(x32Msg); err != nil {
-						glog.Errorf("Failed to send message to Reaper: %s", err)
-					}
-				}
-			})
-		default:
-			glog.Fatalf("Found unexpected fanout targetType %v", tt.targetType)
-		}
+		x32Addr := fmt.Sprintf("/%s", xStat)
+		d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+			glog.V(1).Infof("X-> %s %v", x32Addr, msg.Arguments)
+			// TODO: need a mapping
+			msgs, err := tt.Apply(mapping{}, *msg)
+			if err != nil {
+				glog.Errorf("Failed to handle message: %v", err)
+				return
+			}
+			p.sendMessagesToReaper(msgs)
+		})
 	}
 	return nil
 }
