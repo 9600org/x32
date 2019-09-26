@@ -415,6 +415,32 @@ func (tt *targetTransform) Apply(m mapping, msg osc.Message) ([]osc.Message, err
 	return tt.transform(tt, m, msg)
 }
 
+// guessIconAndColour uses the configured name hints to guess at appropriate
+// icons and colours for the X32 scribble strip based on the passed in name.
+func guessColourAndIcon(nameHints []nameHint, name string) (int32, int32) {
+	colID := int32(-1)
+	iconID := int32(-1)
+	if len(strings.TrimSpace(name)) == 0 {
+		colID = 0
+		iconID = 0
+	} else {
+		for _, hint := range nameHints {
+			if hint.matcher.Match([]byte(strings.ToLower(name))) {
+				if colID == -1 && hint.colour > -1 {
+					colID = hint.colour
+				}
+				if iconID == -1 && hint.icon > -1 {
+					iconID = hint.icon
+				}
+				if colID > -1 && iconID > -1 {
+					break
+				}
+			}
+		}
+	}
+	return colID, iconID
+}
+
 var (
 	// reaperX32StripMap is a map of all /track/${ID}/... subaddresses which
 	// are sent by Reaper, and their corresponding X32 targets.
@@ -476,40 +502,14 @@ var (
 		},
 		"name": targetTransform{target: "config/name", targetType: x32Strip,
 			transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
-				r := make([]osc.Message, 0, 3)
-				// pass on name setting
-				r = append(r,
-					osc.Message{
-						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target),
-						Arguments: msg.Arguments,
-					})
-
 				name, ok := msg.Arguments[0].(string)
 				if !ok {
 					return nil, fmt.Errorf("got %T arg, expected string", msg.Arguments[0])
 				}
 
-				colID := int32(-1)
-				iconID := int32(-1)
-				if len(strings.TrimSpace(name)) == 0 {
-					colID = 0
-					iconID = 0
-				} else {
-					for _, hint := range tt.nameHints {
-						if hint.matcher.Match([]byte(strings.ToLower(name))) {
-							if colID == -1 && hint.colour > -1 {
-								colID = hint.colour
-							}
-							if iconID == -1 && hint.icon > -1 {
-								iconID = hint.icon
-							}
-							if colID > -1 && iconID > -1 {
-								break
-							}
-						}
-					}
-				}
+				r := make([]osc.Message, 0, 3)
 
+				colID, iconID := guessColourAndIcon(tt.nameHints, name)
 				if colID > -1 {
 					r = append(r, osc.Message{
 						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, "config/color"),
@@ -522,6 +522,13 @@ var (
 						Arguments: []interface{}{iconID},
 					})
 				}
+
+				// pass on name setting
+				r = append(r,
+					osc.Message{
+						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target),
+						Arguments: msg.Arguments,
+					})
 
 				// do guessing thing
 				return r, nil
