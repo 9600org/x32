@@ -49,7 +49,7 @@ func TestSplitAddress(t *testing.T) {
 	}
 }
 
-func TestParrseRange(t *testing.T) {
+func TestParseRange(t *testing.T) {
 	for _, test := range []struct {
 		desc    string
 		r       string
