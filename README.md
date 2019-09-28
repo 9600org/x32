@@ -41,4 +41,7 @@ Stuff to do:
     + <st>auto icon/colour on x32<<st>
     + button > /action mapping
     + ...
+		+ bus sends (volume/pan)
+ 		+ detect reconnects and refresh
+
  
