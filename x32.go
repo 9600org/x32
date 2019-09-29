@@ -819,7 +819,7 @@ var (
 					return nil, err
 				}
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqFreqIndex[tt.fxIndex])
-				msg.Arguments = []interface{}{x32LogToHz(l)}
+				msg.Arguments = []interface{}{hzToNeutronEqLog(x32EqFreqLogToHz(l))}
 				return []osc.Message{msg}, nil
 			},
 		},
