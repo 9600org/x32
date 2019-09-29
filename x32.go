@@ -864,7 +864,6 @@ var (
 				id, ok := msg.Arguments[0].(int32)
 				if !ok {
 					return []osc.Message{}, fmt.Errorf("got non-int32 fanout arg[0] of type %T", msg.Arguments[0])
-					return []osc.Message{}, nil
 				}
 				mapping, ok := tt.state.trackMap.x32StatIndex[id]
 				if !ok {
