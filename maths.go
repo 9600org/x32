@@ -109,3 +109,11 @@ func octToNeutronQLog(o float32) float32 {
 	f := float32((math.Atanh(((float64(o)+0.9022102697)/1825.0)-1.0) + 4.1) / 1.86)
 	return f
 }
+
+func x32ToNeutronGain(g float32) float32 {
+	return g+0.167
+}
+
+func neutronToX32Gain(g float32) float32 {
+	return g-0.167
+}

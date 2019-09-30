@@ -392,6 +392,9 @@ func (p *Proxy) ListenAndServe() error {
 
 	go func() {
 		t := time.NewTicker(5 * time.Second)
+				if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
+					glog.Warningf("Failed to send xremote: %v", err)
+				}
 		for {
 			select {
 			case <-t.C:
@@ -808,24 +811,37 @@ var (
 		},
 		"eq/%d/q": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				f, err := getFloatArg(msg, 0)
+				if err != nil {
+					return nil, err
+				}
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqQIndex[tt.fxIndex])
+				// TODO: make this configurable - assumes Neutron currently
+				msg.Arguments = []interface{}{octToNeutronQLog(x32QLogToOct(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
 		"eq/%d/f": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				l, err := getFloatArg(msg, 0)
+				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqFreqIndex[tt.fxIndex])
-				msg.Arguments = []interface{}{hzToNeutronEqLog(x32EqFreqLogToHz(l))}
+				// TODO: make this configurable - assumes Neutron currently
+				msg.Arguments = []interface{}{hzToNeutronEqLog(x32EqFreqLogToHz(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
 		"eq/%d/g": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				f, err := getFloatArg(msg, 0)
+				if err != nil {
+					return nil, err
+				}
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqGainIndex[tt.fxIndex])
+				// TODO: make this configurable - assumes Neutron currently
+				msg.Arguments = []interface{}{x32ToNeutronGain(f)}
 				return []osc.Message{msg}, nil
 			},
 		},
