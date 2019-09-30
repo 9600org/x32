@@ -43,5 +43,6 @@ Stuff to do:
     + ...
 		+ bus sends (volume/pan)
  		+ detect reconnects and refresh
+		+ FQ show UI/view button
 
  
