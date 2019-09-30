@@ -64,6 +64,8 @@ type mapping struct {
 	x32StatIndex     int32
 }
 
+type normalisationFunc func(float32) float32 
+
 type plugParams struct {
 	plugName string
 
@@ -73,6 +75,16 @@ type plugParams struct {
 	eqGainIndex   []int32
 	eqQIndex      []int32
 	eqEnableIndex []int32
+
+	// normalisation funcs
+	// TODO eqTypeMap
+	eqFreqToPlug normalisationFunc
+	eqFreqFromPlug normalisationFunc
+	eqGainToPlug normalisationFunc
+	eqGainFromPlug normalisationFunc
+	eqQToPlug normalisationFunc
+	eqQFromPlug normalisationFunc
+
 }
 
 type fxMap struct {
@@ -816,8 +828,7 @@ var (
 					return nil, err
 				}
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqQIndex[tt.fxIndex])
-				// TODO: make this configurable - assumes Neutron currently
-				msg.Arguments = []interface{}{octToNeutronQLog(x32QLogToOct(f))}
+				msg.Arguments = []interface{}{m.fxMap.plugParams.eqQToPlug(x32QLogToOct(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -828,8 +839,7 @@ var (
 					return nil, err
 				}
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqFreqIndex[tt.fxIndex])
-				// TODO: make this configurable - assumes Neutron currently
-				msg.Arguments = []interface{}{hzToNeutronEqLog(x32EqFreqLogToHz(f))}
+				msg.Arguments = []interface{}{m.fxMap.plugParams.eqFreqToPlug(x32EqFreqLogToHz(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -840,8 +850,7 @@ var (
 					return nil, err
 				}
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqGainIndex[tt.fxIndex])
-				// TODO: make this configurable - assumes Neutron currently
-				msg.Arguments = []interface{}{x32ToNeutronGain(f)}
+				msg.Arguments = []interface{}{m.fxMap.plugParams.eqGainToPlug(f)}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -983,6 +992,13 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 							eqFreqIndex: make([]int32, 6),
 							eqGainIndex: make([]int32, 6),
 							eqQIndex:    make([]int32, 6),
+							// TODO: make this configurable - assumes Neutron currently
+							eqFreqToPlug: hzToNeutronEqLog,
+							eqFreqFromPlug: neutronEqLogToHz,
+							eqGainToPlug: x32ToNeutronGain,
+							eqGainFromPlug: neutronToX32Gain,
+							eqQToPlug: octToNeutronQLog,
+							eqQFromPlug: neutronQLogToOct,
 						}
 
 						p.plugTypes[name] = pt
