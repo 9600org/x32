@@ -2,6 +2,8 @@ package x32
 
 import (
 	"math"
+
+	"github.com/golang/glog"
 )
 
 // x32LogToHz returns the frquency in Hz which coresponds to the 0..1 float
@@ -116,4 +118,64 @@ func normToNeutronGain(g float32) float32 {
 
 func neutronToNormGain(g float32) float32 {
 	return g - 0.167
+}
+
+const (
+	NeutronEqProp = iota
+	NeutronEqBell
+	NeutronEqBandShelf
+	NeutronEqAnalogLowLowShelf
+	NeutronEqBaxLowShelf
+	NeutronEqVintageLowShelf
+	NeutronEqAnalogHighLowShelf
+	NeutronEqBaxHighShelf
+	NeutronEqVintageHighShelf
+	NeutronEqFlatLowPass
+	NeutronEqResonantLowPass
+	NeutronEqFlatHighPass
+	NeutronEqResonantHighPass
+	NeutronEqMax float32 = 12.0
+)
+
+func x32EqTypeToNeutron(t float32) float32 {
+	// TODO: make these mappings be configurable
+	switch t {
+	case 0:
+		return NeutronEqFlatHighPass / NeutronEqMax
+	case 1:
+		return NeutronEqVintageLowShelf / NeutronEqMax
+	case 2:
+		return NeutronEqProp / NeutronEqMax
+	case 3:
+		return NeutronEqBandShelf / NeutronEqMax
+	case 4:
+		return NeutronEqVintageHighShelf / NeutronEqMax
+	case 5:
+		return NeutronEqFlatLowPass / NeutronEqMax
+	}
+	glog.Errorf("Got unknown x32EqType %f", t)
+	return 0
+}
+
+func neutronEqTypeToX32(t float32) float32 {
+	// TODO: make these mappings be configurable
+	i := int(t * NeutronEqMax)
+	switch i {
+	case NeutronEqFlatHighPass:
+		return 0
+	case NeutronEqVintageLowShelf:
+		return 1
+	case NeutronEqProp:
+		return 2
+	case NeutronEqBandShelf:
+		return 3
+	case NeutronEqVintageHighShelf:
+		return 4
+	case NeutronEqFlatLowPass:
+		return 5
+	case NeutronEqResonantHighPass, NeutronEqResonantLowPass, NeutronEqAnalogLowLowShelf, NeutronEqBaxLowShelf, NeutronEqBell, NeutronEqBaxHighShelf:
+		//
+	}
+	glog.Errorf("Got unknown x32EqType %d", i)
+	return 0
 }

@@ -142,6 +142,7 @@ type paramInfo struct {
 	x32AddrFormat string
 	normToX32     normalisationFunc
 	plugToNorm    normalisationFunc
+	format        func(interface{}) interface{}
 }
 
 type plugParams struct {
@@ -164,6 +165,8 @@ type plugParams struct {
 	eqGainFromPlug normalisationFunc
 	eqQToPlug      normalisationFunc
 	eqQFromPlug    normalisationFunc
+	eqTypeToPlug   normalisationFunc
+	eqTypeFromPlug normalisationFunc
 }
 
 type fxMap struct {
@@ -834,9 +837,16 @@ var (
 					return nil, nil //fmt.Errorf("paramInfo @ %d nil", paramIndex)
 				}
 
-				hz := paramInfo.plugToNorm(f)
+				norm := paramInfo.plugToNorm(f)
 				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, paramInfo.x32AddrFormat)
-				msg.Arguments = []interface{}{paramInfo.normToX32(hz)}
+				x32v := paramInfo.normToX32(norm)
+				var x32Arg interface{}
+				if paramInfo.format != nil {
+					x32Arg = paramInfo.format(x32v)
+				} else {
+					x32Arg = x32v
+				}
+				msg.Arguments = []interface{}{x32Arg}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -949,25 +959,9 @@ var (
 				if err != nil {
 					return nil, err
 				}
-				plugEqType := float32(0)
-				// TODO: make this configurable - assumes Neutron currently
-				switch x32EqType {
-				case 0:
-					plugEqType = float32(11.0) / 12
-				case 1:
-					plugEqType = float32(6.0) / 12
-				case 2:
-					plugEqType = float32(0.0) / 12
-				case 3:
-					plugEqType = float32(2.0) / 12
-				case 4:
-					plugEqType = float32(8.0) / 12
-				case 5:
-					plugEqType = float32(9.0) / 12
-				}
 
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqTypeBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{plugEqType}
+				msg.Arguments = []interface{}{m.fxMap.plugParams.eqTypeToPlug(float32(x32EqType))}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -1157,6 +1151,8 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 							eqGainFromPlug: neutronToNormGain,
 							eqQToPlug:      octToNeutronQLog,
 							eqQFromPlug:    neutronQLogToOct,
+							eqTypeToPlug:   x32EqTypeToNeutron,
+							eqTypeFromPlug: neutronEqTypeToX32,
 						}
 
 						p._state.setPlugParams(name, pt)
@@ -1259,7 +1255,8 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			fxMap.setEqParamInfo(pi32, paramInfo{
 				x32AddrFormat: fmt.Sprintf("eq/%d/type", x32BandIndex+1),
 				normToX32:     func(g float32) float32 { return g },
-				plugToNorm:    func(g float32) float32 { return g },
+				plugToNorm:    neutronEqTypeToX32,
+				format:        func(a interface{}) interface{} { return int32(a.(float32)) },
 			})
 		case "eqQName":
 			fxMap.setEqPlugBandQParam(x32BandIndex, pi32)
