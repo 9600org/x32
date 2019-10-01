@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/9600org/go-osc/osc"
@@ -33,21 +34,92 @@ type Proxy struct {
 	x32Server    *osc.Server
 	x32Client    Client
 	x32ServeConn net.PacketConn
+	dispatcher   osc.Dispatcher
 
-	state state
-
-	nameHints         []nameHint
 	fxPlugName        string
 	fxParamNameLookup map[string]string
+	nameHints         []nameHint
 
-	plugTypes map[string]*plugParams
-
-	dispatcher osc.Dispatcher
+	_state state
 }
 
 type state struct {
+	mu            *sync.RWMutex // protects everything below
 	trackMap      trackMap
 	selectedTrack *mapping
+	plugParams    map[string]*plugParams
+}
+
+func (s *state) getReaperPrefixForX32StatIndex(i int) (mapping, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.trackMap.x32StatIndex[int32(i)]
+	return *m, ok
+
+}
+
+func (s *state) getPlugParams(name string) (*plugParams, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.plugParams[name]
+	return p, ok
+}
+
+func (s *state) setPlugParams(name string, pp *plugParams) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.plugParams[name] = pp
+}
+
+func (s *state) getTrackMappingForReaper(name string) (mapping, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.trackMap.reaper[name]
+	return *m, ok
+}
+
+func (s *state) setTrackMappingForReaper(name string, m mapping) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trackMap.reaper[name] = &m
+}
+
+func (s *state) getTrackMappingForX32(name string) (mapping, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.trackMap.x32[name]
+	return *m, ok
+}
+
+func (s *state) setTrackMappingForX32(name string, m mapping) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trackMap.x32[name] = &m
+}
+
+func (s *state) getTrackMappingForX32StatID(id int32) (mapping, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.trackMap.x32StatIndex[id]
+	return *m, ok
+}
+
+func (s *state) setTrackMappingForX32StatID(id int32, m mapping) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trackMap.x32StatIndex[id] = &m
+}
+
+func (s *state) getSelectedTrack() *mapping {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.selectedTrack
+}
+
+func (s *state) selectTrackX32StatID(id int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selectedTrack = s.trackMap.x32StatIndex[id]
 }
 
 type trackMap struct {
@@ -64,7 +136,7 @@ type mapping struct {
 	x32StatIndex     int32
 }
 
-type normalisationFunc func(float32) float32 
+type normalisationFunc func(float32) float32
 
 type plugParams struct {
 	plugName string
@@ -78,16 +150,17 @@ type plugParams struct {
 
 	// normalisation funcs
 	// TODO eqTypeMap
-	eqFreqToPlug normalisationFunc
+	eqFreqToPlug   normalisationFunc
 	eqFreqFromPlug normalisationFunc
-	eqGainToPlug normalisationFunc
+	eqGainToPlug   normalisationFunc
 	eqGainFromPlug normalisationFunc
-	eqQToPlug normalisationFunc
-	eqQFromPlug normalisationFunc
-
+	eqQToPlug      normalisationFunc
+	eqQFromPlug    normalisationFunc
 }
 
 type fxMap struct {
+	mu sync.RWMutex
+
 	// FX indices
 	reaEqIndex   int32 // index of fx which handles EQ
 	reaGateIndex int32
@@ -98,6 +171,47 @@ type fxMap struct {
 	// Gate Param indices
 
 	// Dyn Param indices
+}
+
+func (fx *fxMap) setEqPlugBandFreqParam(x32Band, fxParam int32) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.plugParams.eqFreqIndex[x32Band] = fxParam
+}
+func (fx *fxMap) getEqPlugBandFreqParam(x32Band int32) int32 {
+	fx.mu.RLock()
+	defer fx.mu.RUnlock()
+	return fx.plugParams.eqFreqIndex[x32Band]
+}
+func (fx *fxMap) setEqPlugBandGainParam(x32Band, fxParam int32) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.plugParams.eqGainIndex[x32Band] = fxParam
+}
+func (fx *fxMap) getEqPlugBandGainParam(x32Band int32) int32 {
+	fx.mu.RLock()
+	defer fx.mu.RUnlock()
+	return fx.plugParams.eqGainIndex[x32Band]
+}
+func (fx *fxMap) setEqPlugBandTypeParam(x32Band, fxParam int32) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.plugParams.eqTypeIndex[x32Band] = fxParam
+}
+func (fx *fxMap) getEqPlugBandTypeParam(x32Band int32) int32 {
+	fx.mu.RLock()
+	defer fx.mu.RUnlock()
+	return fx.plugParams.eqTypeIndex[x32Band]
+}
+func (fx *fxMap) setEqPlugBandQParam(x32Band, fxParam int32) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.plugParams.eqQIndex[x32Band] = fxParam
+}
+func (fx *fxMap) getEqPlugBandQParam(x32Band int32) int32 {
+	fx.mu.RLock()
+	defer fx.mu.RUnlock()
+	return fx.plugParams.eqQIndex[x32Band]
 }
 
 var colours = map[string]int32{
@@ -370,11 +484,14 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 		x32Server:         xServer,
 		x32Client:         xClient,
 		x32ServeConn:      xServerConn,
-		state:             state{trackMap: *trackMap},
 		nameHints:         nameHints,
 		fxPlugName:        fxType,
 		fxParamNameLookup: paramLookup,
-		plugTypes:         make(map[string]*plugParams),
+		_state: state{
+			mu:         &sync.RWMutex{},
+			trackMap:   *trackMap,
+			plugParams: make(map[string]*plugParams),
+		},
 	}
 
 	return p, nil
@@ -404,9 +521,9 @@ func (p *Proxy) ListenAndServe() error {
 
 	go func() {
 		t := time.NewTicker(5 * time.Second)
-				if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
-					glog.Warningf("Failed to send xremote: %v", err)
-				}
+		if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
+			glog.Warningf("Failed to send xremote: %v", err)
+		}
 		for {
 			select {
 			case <-t.C:
@@ -575,7 +692,7 @@ var (
 					return []osc.Message{}, nil
 				}
 				defer func() {
-					tt.state.selectedTrack = m
+					tt.state.selectTrackX32StatID(m.x32StatIndex)
 				}()
 				msgs := []osc.Message{
 					// select track on X32
@@ -877,7 +994,11 @@ var (
 				statID--
 				msg.Arguments[0] = float32(i)
 				time.Sleep(time.Second)
-				msg.Address = fmt.Sprintf("/%s/%s", tt.state.trackMap.x32StatIndex[int32(statID)].reaperPrefix, tt.target)
+				reaperMapping, ok := tt.state.getTrackMappingForX32StatID(int32(statID))
+				if !ok {
+					return nil, fmt.Errorf("no stat<>mapping found for statID %d", statID)
+				}
+				msg.Address = fmt.Sprintf("/%s/%s", reaperMapping.reaperPrefix, tt.target)
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -890,13 +1011,13 @@ var (
 				if !ok {
 					return []osc.Message{}, fmt.Errorf("got non-int32 fanout arg[0] of type %T", msg.Arguments[0])
 				}
-				mapping, ok := tt.state.trackMap.x32StatIndex[id]
+				mapping, ok := tt.state.getTrackMappingForX32StatID(id)
 				if !ok {
 					glog.Errorf("ignoring selidx for unmapped id %d", id)
 					return []osc.Message{}, nil
 				}
 				defer func() {
-					tt.state.selectedTrack = mapping
+					tt.state.selectTrackX32StatID(id)
 				}()
 				msgs := []osc.Message{
 					// unselect all repaer tracks:
@@ -955,13 +1076,16 @@ func (p *Proxy) sendMessagesToReaper(msgs []osc.Message) {
 }
 
 func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
-	for rPfx, mapping := range p.state.trackMap.reaper {
+	p._state.mu.Lock()
+	defer p._state.mu.Unlock()
+
+	for rPfx, mapping := range p._state.trackMap.reaper {
 		rPfx := rPfx
 		mapping := mapping
 		for rSfx, tt := range reaperX32StripMap {
 			rSfx := rSfx
 			tt := tt
-			tt.state = &p.state
+			tt.state = &p._state
 			tt.nameHints = p.nameHints
 
 			reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
@@ -984,8 +1108,8 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 					return
 				}
 				if strings.Contains(name, p.fxPlugName) {
-					pt := p.plugTypes[name]
-					if pt == nil {
+					pt, ok := p._state.getPlugParams(name)
+					if !ok {
 						pt = &plugParams{
 							plugName:    name,
 							eqTypeIndex: make([]int32, 6),
@@ -993,15 +1117,15 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 							eqGainIndex: make([]int32, 6),
 							eqQIndex:    make([]int32, 6),
 							// TODO: make this configurable - assumes Neutron currently
-							eqFreqToPlug: hzToNeutronEqLog,
+							eqFreqToPlug:   hzToNeutronEqLog,
 							eqFreqFromPlug: neutronEqLogToHz,
-							eqGainToPlug: x32ToNeutronGain,
+							eqGainToPlug:   x32ToNeutronGain,
 							eqGainFromPlug: neutronToX32Gain,
-							eqQToPlug: octToNeutronQLog,
-							eqQFromPlug: neutronQLogToOct,
+							eqQToPlug:      octToNeutronQLog,
+							eqQFromPlug:    neutronQLogToOct,
 						}
 
-						p.plugTypes[name] = pt
+						p._state.setPlugParams(name, pt)
 					}
 					glog.Infof("Using %q at %d for FX on %s", name, fxIdx, mapping.reaperPrefix)
 					//TODO handle different plugins for each FX type
@@ -1022,10 +1146,11 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 
 	// FX Name watcher
 	catcherFunc := func(m *osc.Message) {
-		if p.state.selectedTrack == nil {
+		selTrack := p._state.getSelectedTrack()
+		if selTrack == nil {
 			return
 		}
-		if p.state.selectedTrack.fxMap == nil {
+		if selTrack.fxMap == nil {
 			return
 		}
 		addrBits := strings.Split(m.Address, "/")
@@ -1043,24 +1168,26 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			return
 		}
 		bits := strings.Split(param, "/")
-		idx := 0
+		idx := int32(0)
 		if len(bits) == 2 {
 			i, err := strconv.Atoi(bits[1])
 			if err != nil {
 				glog.Errorf("invalid fx param index %v: %v", bits[1], err)
 				return
 			}
-			idx = i - 1
+			idx = int32(i - 1)
 		}
+
+		fxMap := selTrack.fxMap
 		switch bits[0] {
 		case "eqFreqName":
-			p.state.selectedTrack.fxMap.plugParams.eqFreqIndex[idx] = int32(fxIndex)
+			fxMap.setEqPlugBandFreqParam(idx, int32(fxIndex))
 		case "eqGainName":
-			p.state.selectedTrack.fxMap.plugParams.eqGainIndex[idx] = int32(fxIndex)
+			fxMap.setEqPlugBandGainParam(idx, int32(fxIndex))
 		case "eqTypeName":
-			p.state.selectedTrack.fxMap.plugParams.eqTypeIndex[idx] = int32(fxIndex)
+			fxMap.setEqPlugBandTypeParam(idx, int32(fxIndex))
 		case "eqQName":
-			p.state.selectedTrack.fxMap.plugParams.eqQIndex[idx] = int32(fxIndex)
+			fxMap.setEqPlugBandQParam(idx, int32(fxIndex))
 		case "gateThresholdName":
 		case "gateRangeName":
 		case "gateAttackName":
@@ -1070,7 +1197,7 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			glog.Errorf("unknown param name %s", bits[0])
 			return
 		}
-		glog.Infof("Found track %d param %s at %d", p.state.selectedTrack.reaperTrackIndex, bits[0], fxIndex)
+		glog.Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], fxIndex)
 	}
 	for fxIdx := 0; fxIdx < 10; fxIdx++ {
 		for paramIdx := 0; paramIdx < 300; paramIdx++ {
@@ -1109,7 +1236,10 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 }
 
 func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
-	for xPfx, mapping := range p.state.trackMap.x32 {
+	p._state.mu.Lock()
+	defer p._state.mu.Unlock()
+
+	for xPfx, mapping := range p._state.trackMap.x32 {
 		xPfx := xPfx
 		mapping := mapping
 
@@ -1117,7 +1247,7 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 		for xSfx, tt := range x32ReaperStripMap {
 			xSfx := xSfx
 			tt := tt
-			tt.state = &p.state
+			tt.state = &p._state
 			tt.nameHints = p.nameHints
 
 			x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
@@ -1159,7 +1289,7 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 		for xStat, tt := range x32ReaperStatMap {
 			xStat := xStat
 			tt := tt
-			tt.state = &p.state
+			tt.state = &p._state
 			tt.nameHints = p.nameHints
 
 			x32Addr := fmt.Sprintf("/%s/%02d", xStat, mapping.x32StatIndex)
@@ -1182,7 +1312,7 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 	for xStat, tt := range x32ReaperFanoutStatMap {
 		xStat := xStat
 		tt := tt
-		tt.state = &p.state
+		tt.state = &p._state
 		tt.nameHints = p.nameHints
 
 		x32Addr := fmt.Sprintf("/%s", xStat)
