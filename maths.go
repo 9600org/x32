@@ -28,7 +28,7 @@ func hzToX32EqFreq(hz float32) float32 {
 		hz = 20000
 	}
 
-	f := float32((math.Log(float64(hz)) - 1.30102999622) / 3.0)
+	f := float32((math.Log10(float64(hz)) - 1.30102999622) / 3.0)
 	return f
 }
 
@@ -80,7 +80,7 @@ func octToX32Q(o float32) float32 {
 		o = 0.3
 	}
 
-	f := float32(-(math.Log(float64(o)) - 1.0) / 1.520030687)
+	f := float32(-(math.Log10(float64(o)) - 1.0) / 1.520030687)
 	return f
 }
 
@@ -110,10 +110,10 @@ func octToNeutronQLog(o float32) float32 {
 	return f
 }
 
-func x32ToNeutronGain(g float32) float32 {
-	return g+0.167
+func normToNeutronGain(g float32) float32 {
+	return g + 0.167
 }
 
-func neutronToX32Gain(g float32) float32 {
-	return g-0.167
+func neutronToNormGain(g float32) float32 {
+	return g - 0.167
 }

@@ -138,6 +138,12 @@ type mapping struct {
 
 type normalisationFunc func(float32) float32
 
+type paramInfo struct {
+	x32AddrFormat string
+	normToX32     normalisationFunc
+	plugToNorm    normalisationFunc
+}
+
 type plugParams struct {
 	plugName string
 
@@ -147,8 +153,8 @@ type plugParams struct {
 	eqGainBandParam   []int32
 	eqQBandParam      []int32
 	eqEnableBandParam []int32
-	// EQ plug Param indices -> X32 band/fx address
-	eqParamToX32 map[int32]string
+	// EQ plug Param indices -> X32 band/fx info
+	eqParamInfo map[int32]paramInfo
 
 	// normalisation funcs
 	// TODO eqTypeMap
@@ -178,42 +184,53 @@ type fxMap struct {
 func (fx *fxMap) setEqPlugBandFreqParam(x32Band, fxParam int32) {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
-	fx.plugParams.eqFreqIndex[x32Band] = fxParam
+	fx.plugParams.eqFreqBandParam[x32Band] = fxParam
 }
 func (fx *fxMap) getEqPlugBandFreqParam(x32Band int32) int32 {
 	fx.mu.RLock()
 	defer fx.mu.RUnlock()
-	return fx.plugParams.eqFreqIndex[x32Band]
+	return fx.plugParams.eqFreqBandParam[x32Band]
 }
 func (fx *fxMap) setEqPlugBandGainParam(x32Band, fxParam int32) {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
-	fx.plugParams.eqGainIndex[x32Band] = fxParam
+	fx.plugParams.eqGainBandParam[x32Band] = fxParam
 }
 func (fx *fxMap) getEqPlugBandGainParam(x32Band int32) int32 {
 	fx.mu.RLock()
 	defer fx.mu.RUnlock()
-	return fx.plugParams.eqGainIndex[x32Band]
+	return fx.plugParams.eqGainBandParam[x32Band]
 }
 func (fx *fxMap) setEqPlugBandTypeParam(x32Band, fxParam int32) {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
-	fx.plugParams.eqTypeIndex[x32Band] = fxParam
+	fx.plugParams.eqTypeBandParam[x32Band] = fxParam
 }
 func (fx *fxMap) getEqPlugBandTypeParam(x32Band int32) int32 {
 	fx.mu.RLock()
 	defer fx.mu.RUnlock()
-	return fx.plugParams.eqTypeIndex[x32Band]
+	return fx.plugParams.eqTypeBandParam[x32Band]
 }
 func (fx *fxMap) setEqPlugBandQParam(x32Band, fxParam int32) {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
-	fx.plugParams.eqQIndex[x32Band] = fxParam
+	fx.plugParams.eqQBandParam[x32Band] = fxParam
 }
 func (fx *fxMap) getEqPlugBandQParam(x32Band int32) int32 {
 	fx.mu.RLock()
 	defer fx.mu.RUnlock()
-	return fx.plugParams.eqQIndex[x32Band]
+	return fx.plugParams.eqQBandParam[x32Band]
+}
+func (fx *fxMap) setEqParamInfo(fxParam int32, info paramInfo) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.plugParams.eqParamInfo[fxParam] = info
+}
+func (fx *fxMap) getEqParamInfo(fxParam int32) (paramInfo, bool) {
+	fx.mu.RLock()
+	defer fx.mu.RUnlock()
+	pi, ok := fx.plugParams.eqParamInfo[fxParam]
+	return pi, ok
 }
 
 var colours = map[string]int32{
@@ -804,29 +821,22 @@ var (
 
 				//TODO broken for different plugs handling different fx
 				//		msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
-				x32Format := m.fxMap.plugParams.eqParamToX32[tt.fxIndex]
-				glog.Infof("x32 format at %d: %s", tt.fxIndex, x32Format)
-				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, fmt.Sprintf(x32Format, m.fxMap.reaEqIndex))
-				msg.Arguments = []interface{}{m.fxMap.plugParams.eqQToPlug(x32QLogToOct(f))}
-				return []osc.Message{msg}, nil
-			},
-		},
+				bits := strings.Split(msg.Address, "/")
+				if l := len(bits); l != 8 {
+					return nil, fmt.Errorf("got address with %d parts, expected 8", l)
+				}
+				paramIndex, err := strconv.Atoi(bits[6])
+				if err != nil {
+					return nil, err
+				}
+				paramInfo, ok := m.fxMap.getEqParamInfo(int32(paramIndex))
+				if !ok {
+					return nil, nil //fmt.Errorf("paramInfo @ %d nil", paramIndex)
+				}
 
-		"fxeq/band/%d/q/oct": targetTransform{target: "eq/%d/q",
-			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
-				return []osc.Message{msg}, nil
-			},
-		},
-		"fxeq/band/%d/f/hz": targetTransform{target: "eq/%d/f",
-			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
-				return []osc.Message{msg}, nil
-			},
-		},
-		"fxeq/band/%d/g/db": targetTransform{target: "eq/%d/g",
-			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				hz := paramInfo.plugToNorm(f)
+				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, paramInfo.x32AddrFormat)
+				msg.Arguments = []interface{}{paramInfo.normToX32(hz)}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -1135,16 +1145,16 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 					if !ok {
 						pt = &plugParams{
 							plugName:        name,
-							eqParamToX32:    make(map[int32]string),
 							eqTypeBandParam: make([]int32, 6),
 							eqFreqBandParam: make([]int32, 6),
 							eqGainBandParam: make([]int32, 6),
 							eqQBandParam:    make([]int32, 6),
+							eqParamInfo:     make(map[int32]paramInfo),
 							// TODO: make this configurable - assumes Neutron currently
 							eqFreqToPlug:   hzToNeutronEqLog,
 							eqFreqFromPlug: neutronEqLogToHz,
-							eqGainToPlug:   x32ToNeutronGain,
-							eqGainFromPlug: neutronToX32Gain,
+							eqGainToPlug:   normToNeutronGain,
+							eqGainFromPlug: neutronToNormGain,
 							eqQToPlug:      octToNeutronQLog,
 							eqQFromPlug:    neutronQLogToOct,
 						}
@@ -1172,9 +1182,10 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 				// TODO: 4 for most things, 6 for bus
 				for paramIdx := 1; paramIdx <= 300; paramIdx++ {
 					ttFx := ttFxTemplate
-					ttFx.state = &p.state
+					ttFx.state = &p._state
 					ttFx.nameHints = p.nameHints
 					//ttFx.target = fmt.Sprintf(ttFx.target, i)
+
 					reaFxAddr := fmt.Sprintf(reaFxAddrTemplate, fxIdx, paramIdx)
 					err := d.AddMsgHandler(reaFxAddr, func(msg *osc.Message) {
 						msgs, err := ttFx.Apply(mapping, *msg)
@@ -1182,7 +1193,7 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 							glog.Errorf("%s: failed to handle message: %v", reaFxAddr, err)
 							return
 						}
-						p.sendMessagesToReaper(msgs)
+						p.sendMessagesToX32(msgs)
 					})
 					if err != nil {
 						glog.Errorf("%s: failed to add handler: %v", reaFxAddr, err)
@@ -1216,31 +1227,47 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			return
 		}
 		bits := strings.Split(param, "/")
-		idx := int32(0)
+		x32BandIndex := int32(0)
 		if len(bits) == 2 {
 			i, err := strconv.Atoi(bits[1])
 			if err != nil {
 				glog.Errorf("invalid fx param index %v: %v", bits[1], err)
 				return
 			}
-			idx = int32(i - 1)
+			x32BandIndex = int32(i - 1)
 		}
 
 		fxMap := selTrack.fxMap
 		pi32 := int32(paramIndex)
 		switch bits[0] {
 		case "eqFreqName":
-			fxMap.setEqPlugBandFreqParam(idx, int32(fxIndex))
-			fxMap.setX32FxAddr(pi32, "eq/%d/f")
+			fxMap.setEqPlugBandFreqParam(x32BandIndex, pi32)
+			fxMap.setEqParamInfo(pi32, paramInfo{
+				x32AddrFormat: fmt.Sprintf("eq/%d/f", x32BandIndex+1),
+				normToX32:     hzToX32EqFreq,
+				plugToNorm:    neutronEqLogToHz,
+			})
 		case "eqGainName":
-			fxMap.setEqPlugBandGainParam(idx, int32(fxIndex))
-			fxMap.setX32FxAddr(pi32, "eq/%d/g")
+			fxMap.setEqPlugBandGainParam(x32BandIndex, pi32)
+			fxMap.setEqParamInfo(pi32, paramInfo{
+				x32AddrFormat: fmt.Sprintf("eq/%d/g", x32BandIndex+1),
+				normToX32:     func(g float32) float32 { return g },
+				plugToNorm:    neutronToNormGain,
+			})
 		case "eqTypeName":
-			fxMap.setEqPlugBandTypeParam(idx, int32(fxIndex))
-			fxMap.setX32FxAddr(pi32, "eq/%d/type")
+			fxMap.setEqPlugBandTypeParam(x32BandIndex, pi32)
+			fxMap.setEqParamInfo(pi32, paramInfo{
+				x32AddrFormat: fmt.Sprintf("eq/%d/type", x32BandIndex+1),
+				normToX32:     func(g float32) float32 { return g },
+				plugToNorm:    func(g float32) float32 { return g },
+			})
 		case "eqQName":
-			fxMap.setEqPlugBandQParam(idx, int32(fxIndex))
-			fxMap.setX32FxAddr(pi32, "eq/%d/q")
+			fxMap.setEqPlugBandQParam(x32BandIndex, pi32)
+			fxMap.setEqParamInfo(pi32, paramInfo{
+				x32AddrFormat: fmt.Sprintf("eq/%d/q", x32BandIndex+1),
+				normToX32:     octToX32Q,
+				plugToNorm:    neutronQLogToOct,
+			})
 		case "gateThresholdName":
 		case "gateRangeName":
 		case "gateAttackName":
@@ -1250,7 +1277,7 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			glog.Errorf("unknown param name %s", bits[0])
 			return
 		}
-		glog.Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], fxIndex)
+		glog.Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], pi32)
 	}
 
 	for fxIdx := 0; fxIdx < 10; fxIdx++ {
