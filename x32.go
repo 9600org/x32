@@ -527,6 +527,12 @@ func buildParamLookup(m map[string]string) map[string]string {
 	return ret
 }
 
+func (p *Proxy) sendXremote() {
+		if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
+			glog.Warningf("Failed to send xremote: %v", err)
+		}
+}
+
 func (p *Proxy) ListenAndServe() error {
 	done := make(chan struct{})
 	defer close(done)
@@ -541,19 +547,15 @@ func (p *Proxy) ListenAndServe() error {
 
 	glog.V(1).Infof("Starting server")
 
+	// Spin off xremote pinger
 	go func() {
 		t := time.NewTicker(5 * time.Second)
-		if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
-			glog.Warningf("Failed to send xremote: %v", err)
-		}
+		p.sendXremote()
+
 		for {
 			select {
 			case <-t.C:
-				// send xremote
-				glog.Infof("xremote")
-				if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
-					glog.Warningf("Failed to send xremote: %v", err)
-				}
+				p.sendXremote()
 			case <-done:
 				return
 			}
@@ -815,7 +817,8 @@ var (
 					return nil, fmt.Errorf("got param message but no track is currently selected")
 				}
 				if m.fxMap == nil {
-					return nil, fmt.Errorf("fxmap nil")
+					glog.V(2).Infof("fxmap nil - probably haven't seen param names yet to create map")
+					return nil, nil
 
 				}
 				if m.fxMap.plugParams == nil {
@@ -1274,7 +1277,7 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			glog.Errorf("unknown param name %s", bits[0])
 			return
 		}
-		glog.Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], pi32)
+		glog.V(2).Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], pi32)
 	}
 
 	for fxIdx := 0; fxIdx < 10; fxIdx++ {
