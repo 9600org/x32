@@ -141,12 +141,14 @@ type normalisationFunc func(float32) float32
 type plugParams struct {
 	plugName string
 
-	// EQ Param indices for bands 0..[4,6]
-	eqTypeIndex   []int32
-	eqFreqIndex   []int32
-	eqGainIndex   []int32
-	eqQIndex      []int32
-	eqEnableIndex []int32
+	// EQ X32 band -> Param indices
+	eqTypeBandParam   []int32
+	eqFreqBandParam   []int32
+	eqGainBandParam   []int32
+	eqQBandParam      []int32
+	eqEnableBandParam []int32
+	// EQ plug Param indices -> X32 band/fx address
+	eqParamToX32 map[int32]string
 
 	// normalisation funcs
 	// TODO eqTypeMap
@@ -783,12 +785,33 @@ var (
 				},
 			},
 		*/
-		"fx/[1-5]/fxparam/%d/value": targetTransform{
+		"fx/%d/fxparam/%d/value": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				f, err := getFloatArg(msg, 0)
+				if err != nil {
+					return nil, err
+				}
+				if tt.state.selectedTrack == nil {
+					return nil, fmt.Errorf("got param message but no track is currently selected")
+				}
+				if m.fxMap == nil {
+					return nil, fmt.Errorf("fxmap nil")
+
+				}
+				if m.fxMap.plugParams == nil {
+					return nil, fmt.Errorf("plugParams nil")
+				}
+
+				//TODO broken for different plugs handling different fx
+				//		msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				x32Format := m.fxMap.plugParams.eqParamToX32[tt.fxIndex]
+				glog.Infof("x32 format at %d: %s", tt.fxIndex, x32Format)
+				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, fmt.Sprintf(x32Format, m.fxMap.reaEqIndex))
+				msg.Arguments = []interface{}{m.fxMap.plugParams.eqQToPlug(x32QLogToOct(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
+
 		"fxeq/band/%d/q/oct": targetTransform{target: "eq/%d/q",
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
@@ -933,7 +956,7 @@ var (
 					plugEqType = float32(9.0) / 12
 				}
 
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqTypeIndex[tt.fxIndex])
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqTypeBandParam[tt.fxIndex])
 				msg.Arguments = []interface{}{plugEqType}
 				return []osc.Message{msg}, nil
 			},
@@ -944,7 +967,7 @@ var (
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqQIndex[tt.fxIndex])
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqQBandParam[tt.fxIndex])
 				msg.Arguments = []interface{}{m.fxMap.plugParams.eqQToPlug(x32QLogToOct(f))}
 				return []osc.Message{msg}, nil
 			},
@@ -955,7 +978,7 @@ var (
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqFreqIndex[tt.fxIndex])
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqFreqBandParam[tt.fxIndex])
 				msg.Arguments = []interface{}{m.fxMap.plugParams.eqFreqToPlug(x32EqFreqLogToHz(f))}
 				return []osc.Message{msg}, nil
 			},
@@ -966,7 +989,7 @@ var (
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqGainIndex[tt.fxIndex])
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqGainBandParam[tt.fxIndex])
 				msg.Arguments = []interface{}{m.fxMap.plugParams.eqGainToPlug(f)}
 				return []osc.Message{msg}, nil
 			},
@@ -1111,11 +1134,12 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 					pt, ok := p._state.getPlugParams(name)
 					if !ok {
 						pt = &plugParams{
-							plugName:    name,
-							eqTypeIndex: make([]int32, 6),
-							eqFreqIndex: make([]int32, 6),
-							eqGainIndex: make([]int32, 6),
-							eqQIndex:    make([]int32, 6),
+							plugName:        name,
+							eqParamToX32:    make(map[int32]string),
+							eqTypeBandParam: make([]int32, 6),
+							eqFreqBandParam: make([]int32, 6),
+							eqGainBandParam: make([]int32, 6),
+							eqQBandParam:    make([]int32, 6),
 							// TODO: make this configurable - assumes Neutron currently
 							eqFreqToPlug:   hzToNeutronEqLog,
 							eqFreqFromPlug: neutronEqLogToHz,
@@ -1141,7 +1165,31 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			}); err != nil {
 				glog.Infof("failed to register catcher func")
 			}
-		}
+			for fxAddr, ttFxTemplate := range reaperX32StripFXMap {
+				fxAddr := fxAddr
+
+				reaFxAddrTemplate := fmt.Sprintf("/%s/%s", rPfx, fxAddr)
+				// TODO: 4 for most things, 6 for bus
+				for paramIdx := 1; paramIdx <= 300; paramIdx++ {
+					ttFx := ttFxTemplate
+					ttFx.state = &p.state
+					ttFx.nameHints = p.nameHints
+					//ttFx.target = fmt.Sprintf(ttFx.target, i)
+					reaFxAddr := fmt.Sprintf(reaFxAddrTemplate, fxIdx, paramIdx)
+					err := d.AddMsgHandler(reaFxAddr, func(msg *osc.Message) {
+						msgs, err := ttFx.Apply(mapping, *msg)
+						if err != nil {
+							glog.Errorf("%s: failed to handle message: %v", reaFxAddr, err)
+							return
+						}
+						p.sendMessagesToReaper(msgs)
+					})
+					if err != nil {
+						glog.Errorf("%s: failed to add handler: %v", reaFxAddr, err)
+					}
+				}
+			}
+		} // fxIdx
 	}
 
 	// FX Name watcher
@@ -1154,7 +1202,7 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			return
 		}
 		addrBits := strings.Split(m.Address, "/")
-		fxIndex, err := strconv.Atoi(addrBits[4])
+		paramIndex, err := strconv.Atoi(addrBits[4])
 		if err != nil {
 			glog.Errorf("Failed to parse FX index: %v", err)
 			return
@@ -1179,15 +1227,20 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 		}
 
 		fxMap := selTrack.fxMap
+		pi32 := int32(paramIndex)
 		switch bits[0] {
 		case "eqFreqName":
 			fxMap.setEqPlugBandFreqParam(idx, int32(fxIndex))
+			fxMap.setX32FxAddr(pi32, "eq/%d/f")
 		case "eqGainName":
 			fxMap.setEqPlugBandGainParam(idx, int32(fxIndex))
+			fxMap.setX32FxAddr(pi32, "eq/%d/g")
 		case "eqTypeName":
 			fxMap.setEqPlugBandTypeParam(idx, int32(fxIndex))
+			fxMap.setX32FxAddr(pi32, "eq/%d/type")
 		case "eqQName":
 			fxMap.setEqPlugBandQParam(idx, int32(fxIndex))
+			fxMap.setX32FxAddr(pi32, "eq/%d/q")
 		case "gateThresholdName":
 		case "gateRangeName":
 		case "gateAttackName":
@@ -1199,6 +1252,7 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 		}
 		glog.Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], fxIndex)
 	}
+
 	for fxIdx := 0; fxIdx < 10; fxIdx++ {
 		for paramIdx := 0; paramIdx < 300; paramIdx++ {
 			if err := d.AddMsgHandler(fmt.Sprintf("/fx/%d/fxparam/%d/name", fxIdx, paramIdx), catcherFunc); err != nil {
@@ -1206,31 +1260,6 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			}
 		}
 
-		/*
-
-			for fxAddr, ttFxTemplate := range reaperX32StripFXMap {
-				fxAddr := fxAddr
-
-				reaFxAddrTemplate := fmt.Sprintf("/%s/%s", rPfx, fxAddr)
-				// TODO: 4 for most things, 6 for bus
-				for i := 1; i <= 6; i++ {
-					ttFx := ttFxTemplate
-					ttFx.target = fmt.Sprintf(ttFx.target, i)
-					reaFxAddr := fmt.Sprintf(reaFxAddrTemplate, i)
-					err := d.AddMsgHandler(reaFxAddr, func(msg *osc.Message) {
-						msgs, err := ttFx.Apply(mapping, *msg)
-						if err != nil {
-							glog.Errorf("%s: failed to handle message: %v", reaFxAddr, err)
-							return
-						}
-						p.sendMessagesToReaper(msgs)
-					})
-					if err != nil {
-						glog.Errorf("%s: failed to add handler: %v", reaFxAddr, err)
-					}
-				}
-			}
-		*/
 	}
 	return nil
 }
