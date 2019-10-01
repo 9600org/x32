@@ -1,6 +1,7 @@
 package x32
 
 import (
+	"time"
 	"github.com/9600org/go-osc/osc"
 )
 
@@ -37,8 +38,10 @@ func (s *ExactDispatcher) Dispatch(packet osc.Packet) {
 
 	case *osc.Bundle:
 		bundle, _ := packet.(*osc.Bundle)
+		timer := time.NewTimer(bundle.Timetag.ExpiresIn())
 
 		go func() {
+			<-timer.C
 			for _, message := range bundle.Messages {
 				handler, ok := s.handlers[message.Address]
 				if !ok {

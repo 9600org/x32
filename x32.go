@@ -121,6 +121,15 @@ func (s *state) selectTrackX32StatID(id int32) {
 	defer s.mu.Unlock()
 	s.selectedTrack = s.trackMap.x32StatIndex[id]
 }
+func (s *state) removeFx(reaperPrefix string, fxIndex int32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.trackMap.reaper[reaperPrefix]
+	if !ok {
+		return
+	}
+	m.fxMap = nil
+}
 
 type trackMap struct {
 	reaper       map[string]*mapping
@@ -528,9 +537,9 @@ func buildParamLookup(m map[string]string) map[string]string {
 }
 
 func (p *Proxy) sendXremote() {
-		if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
-			glog.Warningf("Failed to send xremote: %v", err)
-		}
+	if err := p.x32Client.Send(osc.NewMessage("/xremote")); err != nil {
+		glog.Warningf("Failed to send xremote: %v", err)
+	}
 }
 
 func (p *Proxy) ListenAndServe() error {
@@ -550,7 +559,6 @@ func (p *Proxy) ListenAndServe() error {
 	// Spin off xremote pinger
 	go func() {
 		t := time.NewTicker(5 * time.Second)
-		p.sendXremote()
 
 		for {
 			select {
@@ -561,6 +569,9 @@ func (p *Proxy) ListenAndServe() error {
 			}
 		}
 	}()
+
+
+	p.sendXremote()
 
 	p.sendMessagesToReaper([]osc.Message{
 		osc.Message{Address: "/action/41743", Arguments: []interface{}{int32(1)}},
@@ -816,12 +827,13 @@ var (
 				if tt.state.selectedTrack == nil {
 					return nil, fmt.Errorf("got param message but no track is currently selected")
 				}
-				if m.fxMap == nil {
+				fxMap := m.fxMap
+				if fxMap == nil {
 					glog.V(2).Infof("fxmap nil - probably haven't seen param names yet to create map")
 					return nil, nil
 
 				}
-				if m.fxMap.plugParams == nil {
+				if fxMap.plugParams == nil {
 					return nil, fmt.Errorf("plugParams nil")
 				}
 
@@ -835,7 +847,7 @@ var (
 				if err != nil {
 					return nil, err
 				}
-				paramInfo, ok := m.fxMap.getEqParamInfo(int32(paramIndex))
+				paramInfo, ok := fxMap.getEqParamInfo(int32(paramIndex))
 				if !ok {
 					return nil, nil //fmt.Errorf("paramInfo @ %d nil", paramIndex)
 				}
@@ -992,12 +1004,16 @@ var (
 		},
 		"eq/%d/g": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				fxMap := m.fxMap
+				if fxMap == nil {
+					return nil, nil
+				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqGainBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{m.fxMap.plugParams.eqGainToPlug(f)}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.reaEqIndex, fxMap.plugParams.eqGainBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{fxMap.plugParams.eqGainToPlug(f)}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -1134,7 +1150,12 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			fxNameAddr := fmt.Sprintf("/%s/fx/%d/name", rPfx, fxIdx)
 			if err := d.AddMsgHandler(fxNameAddr, func(msg *osc.Message) {
 				name, ok := msg.Arguments[0].(string)
-				if !ok || len(name) == 0 {
+				if !ok {
+					return
+				}
+				if len(name) == 0 {
+					//TODO handle different plugins for each FX type
+					p._state.removeFx(rPfx, fxIdx)
 					return
 				}
 				if strings.Contains(name, p.fxPlugName) {
