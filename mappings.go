@@ -17,9 +17,6 @@ import (
 // There is one targetTransform instance for each OSC message address that
 // we're interested in.
 type targetTransform struct {
-	// target is the destination OSC Address.
-	// TODO: remove this?
-	target string
 	// transform is the function which actually does the work of transforming its
 	// input message into zero or more output messages.
 	transform func(*targetTransform, *mapping, osc.Message) ([]osc.Message, error)
@@ -41,13 +38,13 @@ var (
 	// reaperX32StripMap is a map of all /track/${ID}/... subaddresses which
 	// are sent by Reaper, and their corresponding X32 targets.
 	reaperX32StripMap = map[string]targetTransform{
-		"volume": targetTransform{target: "mix/fader",
+		"volume": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
+				msg.Address = fmt.Sprintf("/%s/mix/fader", m.x32Prefix)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"mute": targetTransform{target: "mix/on",
+		"mute": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				f, ok := msg.Arguments[0].(float32)
 				if !ok {
@@ -58,17 +55,17 @@ var (
 					return nil, err
 				}
 				msg.Arguments[0] = ni
-				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
+				msg.Address = fmt.Sprintf("/%s/mix/on", m.x32Prefix)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"pan": targetTransform{target: "mix/pan",
+		"pan": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
+				msg.Address = fmt.Sprintf("/%s/mix/pan", m.x32Prefix)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"select": targetTransform{target: "-stat/selidx",
+		"select": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				eq, err := isArgEq(msg, 0, float32(0))
 				if err != nil {
@@ -83,7 +80,7 @@ var (
 				msgs := []osc.Message{
 					// select track on X32
 					osc.Message{
-						Address:   fmt.Sprintf("/%s", tt.target),
+						Address:   "/-stat/selidx",
 						Arguments: []interface{}{int32(m.x32StatIndex)},
 					},
 					// Ping reaper to send FX info
@@ -99,7 +96,7 @@ var (
 				return msgs, nil
 			},
 		},
-		"solo": targetTransform{target: "-stat/solosw",
+		"solo": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("got %d arguments, expected 1", l)
@@ -109,11 +106,11 @@ var (
 					return nil, fmt.Errorf("got %T arg, expected float32", msg.Arguments[0])
 				}
 				msg.Arguments[0] = int32(f)
-				msg.Address = fmt.Sprintf("/%s/%02d", tt.target, m.x32StatIndex)
+				msg.Address = fmt.Sprintf("/-stat/solosw/%02d", m.x32StatIndex)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"name": targetTransform{target: "config/name",
+		"name": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				name, ok := msg.Arguments[0].(string)
 				if !ok {
@@ -125,13 +122,13 @@ var (
 				colID, iconID := guessColourAndIcon(tt.nameHints, name)
 				if colID > -1 {
 					r = append(r, osc.Message{
-						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, "config/color"),
+						Address:   fmt.Sprintf("/%s/config/colour", m.x32Prefix),
 						Arguments: []interface{}{colID},
 					})
 				}
 				if iconID > -1 {
 					r = append(r, osc.Message{
-						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, "config/icon"),
+						Address:   fmt.Sprintf("/%s/config/icon", m.x32Prefix),
 						Arguments: []interface{}{iconID},
 					})
 				}
@@ -139,7 +136,7 @@ var (
 				// pass on name setting
 				r = append(r,
 					osc.Message{
-						Address:   fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target),
+						Address:   fmt.Sprintf("/%s/config/name", m.x32Prefix),
 						Arguments: msg.Arguments,
 					})
 
@@ -151,24 +148,7 @@ var (
 
 	// reaperX32StripFXMap contains mappings for reaper FX messages
 	reaperX32StripFXMap = map[string]targetTransform{
-		// General purpose EQ plugins
-		// TODO fx index management
-		/*
-			"fx/1/fxparam/%d/bypass": targetTransform{target: "fx/%d/eq/on",
-				transform: func(tt *targetTransform, m mapping, msg osc.Message) ([]osc.Message, error) {
-					if l := len(msg.Arguments); l != 1 {
-						return nil, fmt.Errorf("%s: got %d arguments, expected 1", tt.target, l)
-					}
-					i, ok := msg.Arguments[0].(int32)
-					if !ok {
-						return nil, fmt.Errorf("%s: got %T argument, expected int32", tt.target, i)
-					}
-					msg.Arguments[0] = i ^ 1
-					msg.Address = fmt.Sprintf("/%s/%s", m.x32Prefix, tt.target)
-					return []osc.Message{msg}, nil
-				},
-			},
-		*/
+		// TODO: bypass?
 		"fx/%d/fxparam/%d/value": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				f, err := getFloatArg(msg, 0)
@@ -262,13 +242,13 @@ var (
 	// x32eaperStripMap is a map of all addresses which
 	// are sent by Reaper, and their corresponding X32 targets.
 	x32ReaperStripMap = map[string]targetTransform{
-		"mix/fader": targetTransform{target: "volume",
+		"mix/fader": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				msg.Address = fmt.Sprintf("/%s/volume", m.reaperPrefix)
 				return []osc.Message{msg}, nil
 			},
 		},
-		"mix/on": targetTransform{target: "mute",
+		"mix/on": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				i, err := NotInt(msg.Arguments[0])
 				if err != nil {
@@ -279,18 +259,19 @@ var (
 					return nil, err
 				}
 				msg.Arguments[0] = f
-				if m.reaperPrefix != "master" {
-					msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
-				} else {
+				if m.reaperPrefix == "master" {
+					// action/18 is mute master
 					msg.Address = "/action/18"
 					msg.Arguments[0] = i
+				} else {
+					msg.Address = fmt.Sprintf("/%s/mute", m.reaperPrefix)
 				}
 				return []osc.Message{msg}, nil
 			},
 		},
-		"mix/pan": targetTransform{target: "pan",
+		"mix/pan": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				msg.Address = fmt.Sprintf("/%s/pan", m.reaperPrefix)
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -298,17 +279,17 @@ var (
 
 	// x32ReaperStripFXMap contains mappings for x32 FX messages
 	x32ReaperStripFXMap = map[string]targetTransform{
-		"eq/%d/on": targetTransform{target: "fxeq/band/%d/bypass",
+		"eq/%d/on": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				if l := len(msg.Arguments); l != 1 {
-					return nil, fmt.Errorf("%s: got %d arguments, expected 1", tt.target, l)
+					return nil, fmt.Errorf("eq/_/on: got %d arguments, expected 1", l)
 				}
 				i, ok := msg.Arguments[0].(int32)
 				if !ok {
-					return nil, fmt.Errorf("%s: got %T argument, expected int32", tt.target, i)
+					return nil, fmt.Errorf("eq/_/on: got %T argument, expected int32", i)
 				}
 				msg.Arguments[0] = i ^ 1
-				msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
+				msg.Address = fmt.Sprintf("/%s/fxeq/band/%d/bypass", m.reaperPrefix, tt.fxIndex)
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -371,7 +352,7 @@ var (
 	}
 
 	x32ReaperStatMap = map[string]targetTransform{
-		"-stat/solosw": targetTransform{target: "solo",
+		"-stat/solosw": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("unexpected number of arguments (%d), expected 1", l)
@@ -394,14 +375,14 @@ var (
 				if !ok {
 					return nil, fmt.Errorf("no stat<>mapping found for statID %d", statID)
 				}
-				msg.Address = fmt.Sprintf("/%s/%s", reaperMapping.reaperPrefix, tt.target)
+				msg.Address = fmt.Sprintf("/%s/solo", reaperMapping.reaperPrefix)
 				return []osc.Message{msg}, nil
 			},
 		},
 	}
 
 	x32ReaperFanoutStatMap = map[string]targetTransform{
-		"-stat/selidx": targetTransform{target: "select",
+		"-stat/selidx": targetTransform{
 			transform: func(tt *targetTransform, _ *mapping, msg osc.Message) ([]osc.Message, error) {
 				id, ok := msg.Arguments[0].(int32)
 				if !ok {
@@ -419,7 +400,7 @@ var (
 					// unselect all repaer tracks:
 					osc.Message{Address: fmt.Sprintf("/action/40297")},
 					// select track matching x32:
-					osc.Message{Address: fmt.Sprintf("/%s/%s", mapping.reaperPrefix, tt.target), Arguments: []interface{}{int32(1)}},
+					osc.Message{Address: fmt.Sprintf("/%s/select", mapping.reaperPrefix), Arguments: []interface{}{int32(1)}},
 					// Ping reaper to send FX info
 					osc.Message{Address: "/device/track/select", Arguments: []interface{}{mapping.reaperTrackIndex}},
 					osc.Message{Address: "/device/fx/select", Arguments: []interface{}{int32(1)}},
