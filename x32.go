@@ -305,6 +305,84 @@ func (p *Proxy) sendMessagesToReaper(msgs []osc.Message) {
 	}
 }
 
+// nameHandler is a callback for dealing with track name messages from Reaper.
+func (p *Proxy) nameHandler(m *osc.Message) {
+	selTrack := p._state.getSelectedTrack()
+	if selTrack == nil {
+		return
+	}
+	if selTrack.fxMap == nil {
+		return
+	}
+	addrBits := strings.Split(m.Address, "/")
+	paramIndex, err := strconv.Atoi(addrBits[4])
+	if err != nil {
+		glog.Errorf("Failed to parse FX index: %v", err)
+		return
+	}
+	name, _ := m.Arguments[0].(string)
+	if len(name) == 0 {
+		return
+	}
+	param, ok := p.fxParamNameLookup[name]
+	if !ok {
+		return
+	}
+	bits := strings.Split(param, "/")
+	x32BandIndex := int32(0)
+	if len(bits) == 2 {
+		i, err := strconv.Atoi(bits[1])
+		if err != nil {
+			glog.Errorf("invalid fx param index %v: %v", bits[1], err)
+			return
+		}
+		x32BandIndex = int32(i - 1)
+	}
+
+	fxMap := selTrack.fxMap
+	pi32 := int32(paramIndex)
+	switch bits[0] {
+	case "eqFreqName":
+		fxMap.setEqPlugBandFreqParam(x32BandIndex, pi32)
+		fxMap.setEqParamInfo(pi32, paramInfo{
+			x32AddrFormat: fmt.Sprintf("eq/%d/f", x32BandIndex+1),
+			normToX32:     hzToX32EqFreq,
+			plugToNorm:    neutronEqLogToHz,
+		})
+	case "eqGainName":
+		fxMap.setEqPlugBandGainParam(x32BandIndex, pi32)
+		fxMap.setEqParamInfo(pi32, paramInfo{
+			x32AddrFormat: fmt.Sprintf("eq/%d/g", x32BandIndex+1),
+			normToX32:     func(g float32) float32 { return g },
+			plugToNorm:    neutronToNormGain,
+		})
+	case "eqTypeName":
+		fxMap.setEqPlugBandTypeParam(x32BandIndex, pi32)
+		fxMap.setEqParamInfo(pi32, paramInfo{
+			x32AddrFormat: fmt.Sprintf("eq/%d/type", x32BandIndex+1),
+			normToX32:     func(g float32) float32 { return g },
+			plugToNorm:    neutronEqTypeToX32,
+			format:        func(a interface{}) interface{} { return int32(a.(float32)) },
+		})
+	case "eqQName":
+		fxMap.setEqPlugBandQParam(x32BandIndex, pi32)
+		fxMap.setEqParamInfo(pi32, paramInfo{
+			x32AddrFormat: fmt.Sprintf("eq/%d/q", x32BandIndex+1),
+			normToX32:     octToX32Q,
+			plugToNorm:    neutronQLogToOct,
+		})
+	case "gateThresholdName":
+	case "gateRangeName":
+	case "gateAttackName":
+	case "gateHoldName":
+	case "gateReleaseName":
+	default:
+		glog.Errorf("unknown param name %s", bits[0])
+		return
+	}
+	glog.V(2).Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], pi32)
+}
+
 func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 	p._state.mu.Lock()
 	defer p._state.mu.Unlock()
@@ -403,95 +481,16 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 						glog.Errorf("%s: failed to add handler: %v", reaFxAddr, err)
 					}
 				}
-			}
-		} // fxIdx
-	}
-
-	// FX Name watcher
-	catcherFunc := func(m *osc.Message) {
-		selTrack := p._state.getSelectedTrack()
-		if selTrack == nil {
-			return
+			} // fxIdx
 		}
-		if selTrack.fxMap == nil {
-			return
-		}
-		addrBits := strings.Split(m.Address, "/")
-		paramIndex, err := strconv.Atoi(addrBits[4])
-		if err != nil {
-			glog.Errorf("Failed to parse FX index: %v", err)
-			return
-		}
-		name, _ := m.Arguments[0].(string)
-		if len(name) == 0 {
-			return
-		}
-		param, ok := p.fxParamNameLookup[name]
-		if !ok {
-			return
-		}
-		bits := strings.Split(param, "/")
-		x32BandIndex := int32(0)
-		if len(bits) == 2 {
-			i, err := strconv.Atoi(bits[1])
-			if err != nil {
-				glog.Errorf("invalid fx param index %v: %v", bits[1], err)
-				return
-			}
-			x32BandIndex = int32(i - 1)
-		}
-
-		fxMap := selTrack.fxMap
-		pi32 := int32(paramIndex)
-		switch bits[0] {
-		case "eqFreqName":
-			fxMap.setEqPlugBandFreqParam(x32BandIndex, pi32)
-			fxMap.setEqParamInfo(pi32, paramInfo{
-				x32AddrFormat: fmt.Sprintf("eq/%d/f", x32BandIndex+1),
-				normToX32:     hzToX32EqFreq,
-				plugToNorm:    neutronEqLogToHz,
-			})
-		case "eqGainName":
-			fxMap.setEqPlugBandGainParam(x32BandIndex, pi32)
-			fxMap.setEqParamInfo(pi32, paramInfo{
-				x32AddrFormat: fmt.Sprintf("eq/%d/g", x32BandIndex+1),
-				normToX32:     func(g float32) float32 { return g },
-				plugToNorm:    neutronToNormGain,
-			})
-		case "eqTypeName":
-			fxMap.setEqPlugBandTypeParam(x32BandIndex, pi32)
-			fxMap.setEqParamInfo(pi32, paramInfo{
-				x32AddrFormat: fmt.Sprintf("eq/%d/type", x32BandIndex+1),
-				normToX32:     func(g float32) float32 { return g },
-				plugToNorm:    neutronEqTypeToX32,
-				format:        func(a interface{}) interface{} { return int32(a.(float32)) },
-			})
-		case "eqQName":
-			fxMap.setEqPlugBandQParam(x32BandIndex, pi32)
-			fxMap.setEqParamInfo(pi32, paramInfo{
-				x32AddrFormat: fmt.Sprintf("eq/%d/q", x32BandIndex+1),
-				normToX32:     octToX32Q,
-				plugToNorm:    neutronQLogToOct,
-			})
-		case "gateThresholdName":
-		case "gateRangeName":
-		case "gateAttackName":
-		case "gateHoldName":
-		case "gateReleaseName":
-		default:
-			glog.Errorf("unknown param name %s", bits[0])
-			return
-		}
-		glog.V(2).Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], pi32)
 	}
 
 	for fxIdx := 0; fxIdx < 10; fxIdx++ {
 		for paramIdx := 0; paramIdx < 300; paramIdx++ {
-			if err := d.AddMsgHandler(fmt.Sprintf("/fx/%d/fxparam/%d/name", fxIdx, paramIdx), catcherFunc); err != nil {
+			if err := d.AddMsgHandler(fmt.Sprintf("/fx/%d/fxparam/%d/name", fxIdx, paramIdx), p.nameHandler); err != nil {
 				glog.Infof("failed to register catcher func")
 			}
 		}
-
 	}
 	return nil
 }
