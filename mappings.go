@@ -295,11 +295,12 @@ var (
 		},
 		"eq/%d/type": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				if m.fxMap == nil {
+				fxMap := m.fxMap
+				if fxMap == nil {
 					return nil, fmt.Errorf("fxmap nil")
 
 				}
-				if m.fxMap.plugParams == nil {
+				if fxMap.plugParams == nil {
 					return nil, fmt.Errorf("plugParams nil")
 				}
 				x32EqType, err := getIntArg(msg, 0)
@@ -307,30 +308,40 @@ var (
 					return nil, err
 				}
 
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqTypeBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{m.fxMap.plugParams.eqTypeToPlug(float32(x32EqType))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.reaEqIndex, fxMap.plugParams.eqTypeBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{fxMap.plugParams.eqTypeToPlug(float32(x32EqType))}
 				return []osc.Message{msg}, nil
 			},
 		},
 		"eq/%d/q": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				fxMap := m.fxMap
+				if fxMap == nil {
+					return nil, fmt.Errorf("fxmap nil")
+
+				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqQBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{m.fxMap.plugParams.eqQToPlug(x32QLogToOct(f))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.reaEqIndex, fxMap.plugParams.eqQBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{fxMap.plugParams.eqQToPlug(x32QLogToOct(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
 		"eq/%d/f": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				fxMap := m.fxMap
+				if fxMap == nil {
+					return nil, fmt.Errorf("fxmap nil")
+
+				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.reaEqIndex, m.fxMap.plugParams.eqFreqBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{m.fxMap.plugParams.eqFreqToPlug(x32EqFreqLogToHz(f))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.reaEqIndex, fxMap.plugParams.eqFreqBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{fxMap.plugParams.eqFreqToPlug(x32EqFreqLogToHz(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -338,7 +349,7 @@ var (
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				fxMap := m.fxMap
 				if fxMap == nil {
-					return nil, nil
+					return nil, fmt.Errorf("fxmap nil")
 				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
