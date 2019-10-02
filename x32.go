@@ -249,11 +249,11 @@ func (p *Proxy) ListenAndServe() error {
 
 	glog.V(1).Infof("Building Reaper dispatcher")
 	p.reaperServer.Dispatcher = NewExactDispatcher()
-	p.buildReaperDispatcher(p.reaperServer.Dispatcher)
+	p.configureReaperDispatcher(p.reaperServer.Dispatcher)
 
 	glog.V(1).Infof("Building X32 dispatcher")
 	p.x32Server.Dispatcher = NewExactDispatcher()
-	p.buildX32Dispatcher(p.x32Server.Dispatcher)
+	p.configureX32Dispatcher(p.x32Server.Dispatcher)
 
 	glog.V(1).Infof("Starting server")
 
@@ -305,15 +305,28 @@ func (p *Proxy) sendMessagesToReaper(msgs []osc.Message) {
 	}
 }
 
-// nameHandler is a callback for dealing with track name messages from Reaper.
+// nameHandler is a callback for dealing with FX param name messages from Reaper.
+// The parameter names are matched against the ones in the config file in order
+// to build the X32<->Reaper VST FX mappings.
+//
+// To keep the amonut of network traffic down, we only request
+// /fx/_/fxparam/name messages from Reaper (this is configured in the Reaper
+// OSC config file).
 func (p *Proxy) nameHandler(m *osc.Message) {
+	// If there's no track selected, then we don't know which track these
+	// messages refer to :/
 	selTrack := p._state.getSelectedTrack()
 	if selTrack == nil {
 		return
 	}
+
+	// Similarly, if we don't have an FX mapping for this track yet then we can't
+	// store these mappings yet.
 	if selTrack.fxMap == nil {
 		return
 	}
+
+	// Figure out which parameter index and name we're dealing with:
 	addrBits := strings.Split(m.Address, "/")
 	paramIndex, err := strconv.Atoi(addrBits[4])
 	if err != nil {
@@ -324,10 +337,14 @@ func (p *Proxy) nameHandler(m *osc.Message) {
 	if len(name) == 0 {
 		return
 	}
+
+	// is this a parameter name we're interested in?
 	param, ok := p.fxParamNameLookup[name]
 	if !ok {
 		return
 	}
+
+	// Figure out which x32 FX this parameter should map to
 	bits := strings.Split(param, "/")
 	x32BandIndex := int32(0)
 	if len(bits) == 2 {
@@ -339,6 +356,7 @@ func (p *Proxy) nameHandler(m *osc.Message) {
 		x32BandIndex = int32(i - 1)
 	}
 
+	// finally, set up the mapping:
 	fxMap := selTrack.fxMap
 	pi32 := int32(paramIndex)
 	switch bits[0] {
@@ -383,7 +401,9 @@ func (p *Proxy) nameHandler(m *osc.Message) {
 	glog.V(2).Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], pi32)
 }
 
-func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
+// configureReaperDispatcher configures a Dispatcher with registrations for all
+// Reaper originated OSC messages that we're interested in.
+func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 	p._state.mu.Lock()
 	defer p._state.mu.Unlock()
 
@@ -397,7 +417,7 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 			tt.nameHints = p.nameHints
 
 			reaAddr := fmt.Sprintf("/%s/%s", rPfx, rSfx)
-			d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
+			if err := d.AddMsgHandler(reaAddr, func(msg *osc.Message) {
 				glog.V(2).Infof("R-> %s %v", reaAddr, msg.Arguments)
 				msgs, err := tt.Apply(mapping, *msg)
 				if err != nil {
@@ -405,7 +425,9 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 					return
 				}
 				p.sendMessagesToX32(msgs)
-			})
+			}); err != nil {
+				return err
+			}
 		}
 		for fxIdx := int32(0); fxIdx < 10; fxIdx++ {
 			fxIdx := fxIdx
@@ -488,14 +510,16 @@ func (p *Proxy) buildReaperDispatcher(d osc.Dispatcher) error {
 	for fxIdx := 0; fxIdx < 10; fxIdx++ {
 		for paramIdx := 0; paramIdx < 300; paramIdx++ {
 			if err := d.AddMsgHandler(fmt.Sprintf("/fx/%d/fxparam/%d/name", fxIdx, paramIdx), p.nameHandler); err != nil {
-				glog.Infof("failed to register catcher func")
+				return err
 			}
 		}
 	}
 	return nil
 }
 
-func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
+// configureX32Dispatcher configures a dispatcher with handlers for all X32
+// originated OSC messages that we're interested in.
+func (p *Proxy) configureX32Dispatcher(d osc.Dispatcher) error {
 	p._state.mu.Lock()
 	defer p._state.mu.Unlock()
 
@@ -511,7 +535,7 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 			tt.nameHints = p.nameHints
 
 			x32Addr := fmt.Sprintf("/%s/%s", xPfx, xSfx)
-			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+			if err := d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
 				glog.V(2).Infof("X-> %s %v", x32Addr, msg.Arguments)
 				msgs, err := tt.Apply(mapping, *msg)
 				if err != nil {
@@ -519,7 +543,9 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 					return
 				}
 				p.sendMessagesToReaper(msgs)
-			})
+			}); err != nil {
+				return err
+			}
 		}
 
 		for fxAddr, ttFxTemplate := range x32ReaperStripFXMap {
@@ -553,7 +579,7 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 			tt.nameHints = p.nameHints
 
 			x32Addr := fmt.Sprintf("/%s/%02d", xStat, mapping.x32StatIndex)
-			d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+			if err := d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
 				if msg.Address == "/-stat/solo" {
 					return
 				}
@@ -564,7 +590,9 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 					return
 				}
 				p.sendMessagesToReaper(msgs)
-			})
+			}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -576,7 +604,7 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 		tt.nameHints = p.nameHints
 
 		x32Addr := fmt.Sprintf("/%s", xStat)
-		d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
+		if err := d.AddMsgHandler(x32Addr, func(msg *osc.Message) {
 			glog.V(2).Infof("X-> %s %v", x32Addr, msg.Arguments)
 			msgs, err := tt.Apply(&mapping{}, *msg)
 			if err != nil {
@@ -584,11 +612,10 @@ func (p *Proxy) buildX32Dispatcher(d osc.Dispatcher) error {
 				return
 			}
 			p.sendMessagesToReaper(msgs)
-		})
+		}); err != nil {
+			return err
+		}
 	}
 
-	d.AddMsgHandler("/", func(msg *osc.Message) {
-		glog.V(2).Infof("Unhandled X-> %s %v", msg.Address, msg.Arguments)
-	})
 	return nil
 }
