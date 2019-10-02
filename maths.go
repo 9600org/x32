@@ -174,7 +174,7 @@ func neutronEqTypeToX32(t float32) float32 {
 	case NeutronEqFlatLowPass:
 		return 5
 	case NeutronEqResonantHighPass, NeutronEqResonantLowPass, NeutronEqAnalogLowLowShelf, NeutronEqBaxLowShelf, NeutronEqBell, NeutronEqBaxHighShelf:
-		//
+		return 0
 	}
 	glog.Errorf("Got unknown x32EqType %d", i)
 	return 0

@@ -126,6 +126,7 @@ func (s *state) removeFx(reaperPrefix string, fxIndex int32) {
 	if !ok {
 		return
 	}
+	//glog.V(1).Infof("Removing fxMap on %s@%d", reaperPrefix, fxIndex)
 	m.fxMap = nil
 }
 
@@ -317,12 +318,14 @@ func (p *Proxy) nameHandler(m *osc.Message) {
 	// messages refer to :/
 	selTrack := p._state.getSelectedTrack()
 	if selTrack == nil {
+		glog.Infof("no track selected")
 		return
 	}
 
 	// Similarly, if we don't have an FX mapping for this track yet then we can't
 	// store these mappings yet.
 	if selTrack.fxMap == nil {
+		glog.V(2).Infof("no fxMap on %s", selTrack.reaperPrefix)
 		return
 	}
 
