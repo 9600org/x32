@@ -18,7 +18,7 @@ func ListenAndServeStatus(listenAddr string, s *state) error {
 		{{range $k, $v := .}}
 			<tr>
 					<td>{{$k}}</td>
-					<td>{{$v | printf "%+v"}}</td>
+					<td>{{$v | printf "%#v"}}</td>
 			</tr>
 		{{end}}
 		</table>

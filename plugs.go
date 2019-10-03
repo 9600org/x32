@@ -1,6 +1,7 @@
 package x32
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -78,4 +79,14 @@ type fxMap struct {
 	eq   *fxInstance
 	gate *fxInstance
 	dyn  *fxInstance
+}
+
+func (f *fxMap) String() string {
+	nilOrIdx := func(f *fxInstance) string {
+		if f == nil {
+			return "<nil>"
+		}
+		return fmt.Sprintf("@%d", f.vstIndex)
+	}
+	return fmt.Sprintf("fxMap:{eq:%d gate:%s dyn:%s}", nilOrIdx(f.eq), nilOrIdx(f.gate), nilOrIdx(f.dyn))
 }

@@ -156,11 +156,6 @@ var (
 					return nil, err
 				}
 				fxMap := m.fxMap
-				if fxMap == nil {
-					glog.Errorf("fxMap nil on %s", m.reaperPrefix)
-					return nil, nil
-
-				}
 				//TODO broken for different plugs handling different fx
 				//		msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				bits := strings.Split(msg.Address, "/")
@@ -307,10 +302,6 @@ var (
 		"eq/%d/type": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				fxMap := m.fxMap
-				if fxMap == nil {
-					return nil, fmt.Errorf("fxmap nil")
-
-				}
 				if fxMap.eq == nil {
 					return nil, fmt.Errorf("fxMap.eq nil")
 				}
@@ -327,10 +318,6 @@ var (
 		"eq/%d/q": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				fxMap := m.fxMap
-				if fxMap == nil {
-					return nil, fmt.Errorf("fxmap nil")
-
-				}
 				if fxMap.eq == nil {
 					return nil, fmt.Errorf("fxMap.eq nil")
 				}
@@ -346,10 +333,6 @@ var (
 		"eq/%d/f": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				fxMap := m.fxMap
-				if fxMap == nil {
-					return nil, fmt.Errorf("fxmap nil")
-
-				}
 				if fxMap.eq == nil {
 					return nil, fmt.Errorf("fxMap.eq nil")
 				}
@@ -365,9 +348,6 @@ var (
 		"eq/%d/g": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
 				fxMap := m.fxMap
-				if fxMap == nil {
-					return nil, fmt.Errorf("fxmap nil")
-				}
 				if fxMap.eq == nil {
 					return nil, fmt.Errorf("fxMap.eq nil")
 				}

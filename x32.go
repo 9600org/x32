@@ -149,7 +149,7 @@ type trackMap struct {
 type mapping struct {
 	reaperPrefix     string
 	reaperTrackIndex int32
-	fxMap            *fxMap
+	fxMap            fxMap
 	x32Prefix        string
 	x32StatIndex     int32
 }
@@ -432,7 +432,7 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 					return
 				}
 				name = strings.TrimSpace(name)
-				if len(name) == 0 && mapping.fxMap != nil {
+				if len(name) == 0 {
 					//TODO handle different plugins for each FX type
 					p._state.removeFx(rPfx, fxIdx)
 					return
@@ -445,13 +445,9 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 					}
 					glog.Infof("Using %q at %d for FX on %s", name, fxIdx, mapping.reaperPrefix)
 					//TODO handle different plugins for each FX type
-					mapping.fxMap = &fxMap{
-						eq:   &fxInstance{vstIndex: fxIdx, params: &pt},
-						dyn:  &fxInstance{vstIndex: fxIdx, params: &pt},
-						gate: &fxInstance{vstIndex: fxIdx, params: &pt},
-					}
-				} else {
-					mapping.fxMap = nil
+					mapping.fxMap.eq = &fxInstance{vstIndex: fxIdx, params: &pt}
+					mapping.fxMap.gate = &fxInstance{vstIndex: fxIdx, params: &pt}
+					mapping.fxMap.dyn = &fxInstance{vstIndex: fxIdx, params: &pt}
 				}
 			}); err != nil {
 				glog.Infof("failed to register catcher func")
@@ -472,7 +468,7 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 					err := d.AddMsgHandler(reaFxAddr, func(msg *osc.Message) {
 						msgs, err := ttFx.Apply(mapping, *msg)
 						if err != nil {
-							glog.Errorf("%s: failed to handle message: %v", reaFxAddr, err)
+							//glog.Errorf("%s: failed to handle message: %v", reaFxAddr, err)
 							return
 						}
 						p.sendMessagesToX32(msgs)
