@@ -160,7 +160,7 @@ var (
 				}
 				fxMap := m.fxMap
 				if fxMap == nil {
-					glog.V(2).Infof("fxmap nil - probably haven't seen param names yet to create map")
+					glog.V(3).Infof("fxmap nil - probably haven't seen param names yet to create map")
 					return nil, nil
 
 				}

@@ -274,16 +274,18 @@ func (p *Proxy) ListenAndServe() error {
 
 	p.sendXremote()
 
-	p.sendMessagesToReaper([]osc.Message{
-		osc.Message{Address: "/action/41743", Arguments: []interface{}{int32(1)}},
-	})
-
 	errGroup := errgroup.Group{}
 	errGroup.Go(func() error {
 		return p.x32Server.Serve(p.x32ServeConn)
 	})
 
 	errGroup.Go(p.reaperServer.ListenAndServe)
+
+	time.Sleep(time.Second) // TODO: yuk
+
+	p.sendMessagesToReaper([]osc.Message{
+		osc.Message{Address: "/action/41743", Arguments: []interface{}{int32(1)}},
+	})
 
 	return errGroup.Wait()
 }
@@ -325,7 +327,7 @@ func (p *Proxy) nameHandler(m *osc.Message) {
 	// Similarly, if we don't have an FX mapping for this track yet then we can't
 	// store these mappings yet.
 	if selTrack.fxMap == nil {
-		glog.V(2).Infof("no fxMap on %s", selTrack.reaperPrefix)
+		glog.V(3).Infof("no fxMap on %s", selTrack.reaperPrefix)
 		return
 	}
 
