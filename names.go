@@ -52,7 +52,7 @@ func guessColourAndIcon(nameHints []nameHint, name string) (int32, int32) {
 	iconID := int32(-1)
 	if len(strings.TrimSpace(name)) == 0 {
 		colID = 0
-		iconID = 0
+		iconID = 1
 	} else {
 		for _, hint := range nameHints {
 			if hint.matcher.Match([]byte(strings.ToLower(name))) {

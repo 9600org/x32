@@ -122,7 +122,7 @@ var (
 				colID, iconID := guessColourAndIcon(tt.nameHints, name)
 				if colID > -1 {
 					r = append(r, osc.Message{
-						Address:   fmt.Sprintf("/%s/config/colour", m.x32Prefix),
+						Address:   fmt.Sprintf("/%s/config/color", m.x32Prefix),
 						Arguments: []interface{}{colID},
 					})
 				}
