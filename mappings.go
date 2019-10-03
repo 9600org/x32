@@ -155,32 +155,43 @@ var (
 				if err != nil {
 					return nil, err
 				}
-				if tt.state.selectedTrack == nil {
-					return nil, fmt.Errorf("got param message but no track is currently selected")
-				}
 				fxMap := m.fxMap
 				if fxMap == nil {
-					glog.V(3).Infof("fxmap nil - probably haven't seen param names yet to create map")
+					glog.Errorf("fxMap nil on %s", m.reaperPrefix)
 					return nil, nil
 
 				}
-				if fxMap.plugParams == nil {
-					return nil, fmt.Errorf("plugParams nil")
-				}
-
 				//TODO broken for different plugs handling different fx
 				//		msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				bits := strings.Split(msg.Address, "/")
 				if l := len(bits); l != 8 {
 					return nil, fmt.Errorf("got address with %d parts, expected 8", l)
 				}
+				vstIndex, err := strconv.Atoi(bits[4])
+				if err != nil {
+					return nil, err
+				}
 				paramIndex, err := strconv.Atoi(bits[6])
 				if err != nil {
 					return nil, err
 				}
-				paramInfo, ok := fxMap.getEqParamInfo(int32(paramIndex))
+				var fxInst *fxInstance
+				for _, instance := range []*fxInstance{fxMap.eq, fxMap.gate, fxMap.dyn} {
+					if instance == nil {
+						continue
+					}
+					if int32(vstIndex) == instance.vstIndex {
+						fxInst = instance
+						break
+					}
+				}
+				if fxInst == nil {
+					return nil, nil
+				}
+
+				paramInfo, ok := fxInst.params.eqParamInfo[int32(paramIndex)]
 				if !ok {
-					return nil, nil //fmt.Errorf("paramInfo @ %d nil", paramIndex)
+					return nil, fmt.Errorf("paramInfo @ %d on %s nil", paramIndex, m.reaperPrefix)
 				}
 
 				norm := paramInfo.plugToNorm(f)
@@ -300,16 +311,16 @@ var (
 					return nil, fmt.Errorf("fxmap nil")
 
 				}
-				if fxMap.plugParams == nil {
-					return nil, fmt.Errorf("plugParams nil")
+				if fxMap.eq == nil {
+					return nil, fmt.Errorf("fxMap.eq nil")
 				}
 				x32EqType, err := getIntArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
 
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.reaEqIndex, fxMap.plugParams.eqTypeBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{fxMap.plugParams.eqTypeToPlug(float32(x32EqType))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.eq.vstIndex, fxMap.eq.params.eqTypeBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{fxMap.eq.params.eqTypeToPlug(float32(x32EqType))}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -320,12 +331,15 @@ var (
 					return nil, fmt.Errorf("fxmap nil")
 
 				}
+				if fxMap.eq == nil {
+					return nil, fmt.Errorf("fxMap.eq nil")
+				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.reaEqIndex, fxMap.plugParams.eqQBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{fxMap.plugParams.eqQToPlug(x32QLogToOct(f))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.eq.vstIndex, fxMap.eq.params.eqQBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{fxMap.eq.params.eqQToPlug(x32QLogToOct(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -336,12 +350,15 @@ var (
 					return nil, fmt.Errorf("fxmap nil")
 
 				}
+				if fxMap.eq == nil {
+					return nil, fmt.Errorf("fxMap.eq nil")
+				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.reaEqIndex, fxMap.plugParams.eqFreqBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{fxMap.plugParams.eqFreqToPlug(x32EqFreqLogToHz(f))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.eq.vstIndex, fxMap.eq.params.eqFreqBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{fxMap.eq.params.eqFreqToPlug(x32EqFreqLogToHz(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -351,12 +368,15 @@ var (
 				if fxMap == nil {
 					return nil, fmt.Errorf("fxmap nil")
 				}
+				if fxMap.eq == nil {
+					return nil, fmt.Errorf("fxMap.eq nil")
+				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.reaEqIndex, fxMap.plugParams.eqGainBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{fxMap.plugParams.eqGainToPlug(f)}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.eq.vstIndex, fxMap.eq.params.eqGainBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{fxMap.eq.params.eqGainToPlug(f)}
 				return []osc.Message{msg}, nil
 			},
 		},

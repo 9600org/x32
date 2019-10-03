@@ -126,8 +126,18 @@ func (s *state) removeFx(reaperPrefix string, fxIndex int32) {
 	if !ok {
 		return
 	}
-	//glog.V(1).Infof("Removing fxMap on %s@%d", reaperPrefix, fxIndex)
-	m.fxMap = nil
+	if m.fxMap.eq != nil && m.fxMap.eq.vstIndex == fxIndex {
+		glog.V(1).Infof("Removing EQ mapping at %s@%d", reaperPrefix, fxIndex)
+		m.fxMap.eq = nil
+	}
+	if m.fxMap.gate != nil && m.fxMap.gate.vstIndex == fxIndex {
+		glog.V(1).Infof("Removing Gate mapping at %s@%d", reaperPrefix, fxIndex)
+		m.fxMap.gate = nil
+	}
+	if m.fxMap.dyn != nil && m.fxMap.dyn.vstIndex == fxIndex {
+		glog.V(1).Infof("Removing Dyn mapping at %s@%d", reaperPrefix, fxIndex)
+		m.fxMap.dyn = nil
+	}
 }
 
 type trackMap struct {
@@ -385,107 +395,6 @@ func (p *Proxy) sendMessagesToReaper(msgs []osc.Message) {
 	}
 }
 
-/*
-// nameHandler is a callback for dealing with FX param name messages from Reaper.
-// The parameter names are matched against the ones in the config file in order
-// to build the X32<->Reaper VST FX mappings.
-//
-// To keep the amonut of network traffic down, we only request
-// /fx/_/fxparam/name messages from Reaper (this is configured in the Reaper
-// OSC config file).
-func (p *Proxy) nameHandler(m *osc.Message) {
-	// If there's no track selected, then we don't know which track these
-	// messages refer to :/
-	selTrack := p._state.getSelectedTrack()
-	if selTrack == nil {
-		glog.Infof("no track selected")
-		return
-	}
-
-	// Similarly, if we don't have an FX mapping for this track yet then we can't
-	// store these mappings yet.
-	if selTrack.fxMap == nil {
-		glog.V(3).Infof("no fxMap on %s", selTrack.reaperPrefix)
-		return
-	}
-
-	// Figure out which parameter index and name we're dealing with:
-	addrBits := strings.Split(m.Address, "/")
-	paramIndex, err := strconv.Atoi(addrBits[4])
-	if err != nil {
-		glog.Errorf("Failed to parse FX index: %v", err)
-		return
-	}
-	name, _ := m.Arguments[0].(string)
-	if len(name) == 0 {
-		return
-	}
-
-	// is this a parameter name we're interested in?
-	param, ok := p.eqParamNameLookup[name]
-	if !ok {
-		return
-	}
-
-	// Figure out which x32 FX this parameter should map to
-	bits := strings.Split(param, "/")
-	x32BandIndex := int32(0)
-	if len(bits) == 2 {
-		i, err := strconv.Atoi(bits[1])
-		if err != nil {
-			glog.Errorf("invalid fx param index %v: %v", bits[1], err)
-			return
-		}
-		x32BandIndex = int32(i - 1)
-	}
-
-	// finally, set up the mapping:
-	fxMap := selTrack.fxMap
-	pi32 := int32(paramIndex)
-	switch bits[0] {
-	case "eqFreqName":
-		fxMap.setEqPlugBandFreqParam(x32BandIndex, pi32)
-		fxMap.setEqParamInfo(pi32, paramInfo{
-			x32AddrFormat: fmt.Sprintf("eq/%d/f", x32BandIndex+1),
-			normToX32:     hzToX32EqFreq,
-			plugToNorm:    neutronEqLogToHz,
-		})
-	case "eqGainName":
-		fxMap.setEqPlugBandGainParam(x32BandIndex, pi32)
-		fxMap.setEqParamInfo(pi32, paramInfo{
-			x32AddrFormat: fmt.Sprintf("eq/%d/g", x32BandIndex+1),
-			normToX32:     func(g float32) float32 { return g },
-			plugToNorm:    neutronToNormGain,
-		})
-	case "eqTypeName":
-		fxMap.setEqPlugBandTypeParam(x32BandIndex, pi32)
-		fxMap.setEqParamInfo(pi32, paramInfo{
-			x32AddrFormat: fmt.Sprintf("eq/%d/type", x32BandIndex+1),
-			normToX32:     func(g float32) float32 { return g },
-			plugToNorm:    neutronEqTypeToX32,
-			format:        func(a interface{}) interface{} { return int32(a.(float32)) },
-		})
-	case "eqQName":
-		fxMap.setEqPlugBandQParam(x32BandIndex, pi32)
-		fxMap.setEqParamInfo(pi32, paramInfo{
-			x32AddrFormat: fmt.Sprintf("eq/%d/q", x32BandIndex+1),
-			normToX32:     octToX32Q,
-			plugToNorm:    neutronQLogToOct,
-		})
-	case "gateThresholdName":
-	case "gateRangeName":
-	case "gateAttackName":
-	case "gateHoldName":
-	case "gateReleaseName":
-	default:
-		glog.Errorf("unknown param name %s", bits[0])
-		return
-	}
-	glog.V(2).Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], pi32)
-}
-
-*/
-
 // configureReaperDispatcher configures a Dispatcher with registrations for all
 // Reaper originated OSC messages that we're interested in.
 func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
@@ -523,9 +432,9 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 					return
 				}
 				name = strings.TrimSpace(name)
-				if len(name) == 0 && mapping.fxMap != nil && mapping.fxMap.reaEqIndex == fxIdx {
+				if len(name) == 0 && mapping.fxMap != nil {
 					//TODO handle different plugins for each FX type
-					//p._state.removeFx(rPfx, fxIdx)
+					p._state.removeFx(rPfx, fxIdx)
 					return
 				}
 				if strings.Contains(name, p.fxPlugName) {
@@ -537,10 +446,9 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 					glog.Infof("Using %q at %d for FX on %s", name, fxIdx, mapping.reaperPrefix)
 					//TODO handle different plugins for each FX type
 					mapping.fxMap = &fxMap{
-						reaEqIndex:   fxIdx,
-						reaGateIndex: fxIdx,
-						reaDynIndex:  fxIdx,
-						plugParams:   &pt,
+						eq:   &fxInstance{vstIndex: fxIdx, params: &pt},
+						dyn:  &fxInstance{vstIndex: fxIdx, params: &pt},
+						gate: &fxInstance{vstIndex: fxIdx, params: &pt},
 					}
 				} else {
 					mapping.fxMap = nil
@@ -548,6 +456,7 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 			}); err != nil {
 				glog.Infof("failed to register catcher func")
 			}
+
 			for fxAddr, ttFxTemplate := range reaperX32StripFXMap {
 				fxAddr := fxAddr
 
@@ -571,7 +480,7 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 					if err != nil {
 						glog.Errorf("%s: failed to add handler: %v", reaFxAddr, err)
 					}
-				}
+				} // paramIdx
 			} // fxIdx
 		}
 	}

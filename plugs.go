@@ -64,76 +64,18 @@ type plugParams struct {
 	eqTypeFromPlug normalisationFunc
 }
 
+type fxInstance struct {
+	vstIndex int32
+
+	params *plugParams
+}
+
 // fxMap represents the VST<->X32 mapping of effects.
 type fxMap struct {
 	// mu protects the fields below.
 	mu sync.RWMutex
 
-	// FX indices:
-
-	// reaEqIndex is the VST plug index on the reaper track which handles EQ
-	reaEqIndex int32
-	// reaEqIndex is the VST plug index on the reaper track which handles Gate
-	reaGateIndex int32
-	// reaEqIndex is the VST plug index on the reaper track which handles Compression
-	reaDynIndex int32
-
-	// plugParams tracks the VST parameter indices
-	plugParams *plugParams
-
-	// Gate Param indices
-
-	// Dyn Param indices
-}
-
-func (fx *fxMap) setEqPlugBandFreqParam(x32Band, fxParam int32) {
-	fx.mu.Lock()
-	defer fx.mu.Unlock()
-	fx.plugParams.eqFreqBandParam[x32Band] = fxParam
-}
-func (fx *fxMap) getEqPlugBandFreqParam(x32Band int32) int32 {
-	fx.mu.RLock()
-	defer fx.mu.RUnlock()
-	return fx.plugParams.eqFreqBandParam[x32Band]
-}
-func (fx *fxMap) setEqPlugBandGainParam(x32Band, fxParam int32) {
-	fx.mu.Lock()
-	defer fx.mu.Unlock()
-	fx.plugParams.eqGainBandParam[x32Band] = fxParam
-}
-func (fx *fxMap) getEqPlugBandGainParam(x32Band int32) int32 {
-	fx.mu.RLock()
-	defer fx.mu.RUnlock()
-	return fx.plugParams.eqGainBandParam[x32Band]
-}
-func (fx *fxMap) setEqPlugBandTypeParam(x32Band, fxParam int32) {
-	fx.mu.Lock()
-	defer fx.mu.Unlock()
-	fx.plugParams.eqTypeBandParam[x32Band] = fxParam
-}
-func (fx *fxMap) getEqPlugBandTypeParam(x32Band int32) int32 {
-	fx.mu.RLock()
-	defer fx.mu.RUnlock()
-	return fx.plugParams.eqTypeBandParam[x32Band]
-}
-func (fx *fxMap) setEqPlugBandQParam(x32Band, fxParam int32) {
-	fx.mu.Lock()
-	defer fx.mu.Unlock()
-	fx.plugParams.eqQBandParam[x32Band] = fxParam
-}
-func (fx *fxMap) getEqPlugBandQParam(x32Band int32) int32 {
-	fx.mu.RLock()
-	defer fx.mu.RUnlock()
-	return fx.plugParams.eqQBandParam[x32Band]
-}
-func (fx *fxMap) setEqParamInfo(fxParam int32, info paramInfo) {
-	fx.mu.Lock()
-	defer fx.mu.Unlock()
-	fx.plugParams.eqParamInfo[fxParam] = info
-}
-func (fx *fxMap) getEqParamInfo(fxParam int32) (paramInfo, bool) {
-	fx.mu.RLock()
-	defer fx.mu.RUnlock()
-	pi, ok := fx.plugParams.eqParamInfo[fxParam]
-	return pi, ok
+	eq   *fxInstance
+	gate *fxInstance
+	dyn  *fxInstance
 }
