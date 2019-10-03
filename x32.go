@@ -280,6 +280,7 @@ func (p *Proxy) ListenAndServe() error {
 	})
 
 	errGroup.Go(p.reaperServer.ListenAndServe)
+	errGroup.Go(func() error { return ListenAndServeStatus(":8000", &p._state) })
 
 	time.Sleep(time.Second) // TODO: yuk
 
