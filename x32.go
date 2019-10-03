@@ -294,16 +294,16 @@ func buildPlugParamsMap(m map[string]map[string]map[string]int32) (map[string]pl
 							normToX32:     func(g float32) float32 { return g },
 							plugToNorm:    neutronToNormGain,
 						}
-					case "q":
-						pt.eqQBandParam[eqIdx] = paramIndex
+					case "type":
+						pt.eqTypeBandParam[eqIdx] = paramIndex
 						pt.eqParamInfo[paramIndex] = paramInfo{
 							x32AddrFormat: fmt.Sprintf("eq/%d/type", eqIdx+1),
 							normToX32:     func(g float32) float32 { return g },
 							plugToNorm:    neutronEqTypeToX32,
 							format:        func(a interface{}) interface{} { return int32(a.(float32)) },
 						}
-					case "type":
-						pt.eqTypeBandParam[eqIdx] = paramIndex
+					case "q":
+						pt.eqQBandParam[eqIdx] = paramIndex
 						pt.eqParamInfo[paramIndex] = paramInfo{
 							x32AddrFormat: fmt.Sprintf("eq/%d/q", eqIdx+1),
 							normToX32:     octToX32Q,
