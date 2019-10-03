@@ -22,8 +22,8 @@ type ProxyConfig struct {
 
 	NameHints map[string]string `yaml:"nameHints"`
 
-	FxMap  map[string]map[string]string `yaml:"fxMap"`
-	FxType string                       `yaml:"fxType"`
+	FxMap  map[string]map[string]map[string]int32 `yaml:"fxMap"`
+	FxType string                                 `yaml:"fxType"`
 }
 
 type Proxy struct {
@@ -34,9 +34,9 @@ type Proxy struct {
 	x32ServeConn net.PacketConn
 	dispatcher   osc.Dispatcher
 
-	fxPlugName        string
-	fxParamNameLookup map[string]string
-	nameHints         []nameHint
+	fxPlugName   string
+	fxPlugParams map[string]plugParams
+	nameHints    []nameHint
 
 	_state state
 }
@@ -208,18 +208,20 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 
 	// TODO support multiple fx types - e.g. different plugs for different fx
 	fxType := config.FxType
-	fxMap := config.FxMap[fxType]
-	paramLookup := buildParamLookup(fxMap)
+	pp, err := buildPlugParamsMap(config.FxMap)
+	if err != nil {
+		return nil, err
+	}
 
 	p := &Proxy{
-		reaperServer:      reaperServer,
-		reaperClient:      rClient,
-		x32Server:         xServer,
-		x32Client:         xClient,
-		x32ServeConn:      xServerConn,
-		nameHints:         nameHints,
-		fxPlugName:        fxType,
-		fxParamNameLookup: paramLookup,
+		reaperServer: reaperServer,
+		reaperClient: rClient,
+		x32Server:    xServer,
+		x32Client:    xClient,
+		x32ServeConn: xServerConn,
+		nameHints:    nameHints,
+		fxPlugName:   fxType,
+		fxPlugParams: pp,
 		_state: state{
 			mu:         &sync.RWMutex{},
 			trackMap:   *trackMap,
@@ -230,12 +232,86 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 	return p, nil
 }
 
-func buildParamLookup(m map[string]string) map[string]string {
-	ret := make(map[string]string)
-	for k, v := range m {
-		ret[v] = k
+func buildPlugParamsMap(m map[string]map[string]map[string]int32) (map[string]plugParams, error) {
+	ret := make(map[string]plugParams)
+	for fxName, sections := range m {
+		pt := plugParams{
+			plugName:        fxName,
+			eqTypeBandParam: make([]int32, 6),
+			eqFreqBandParam: make([]int32, 6),
+			eqGainBandParam: make([]int32, 6),
+			eqQBandParam:    make([]int32, 6),
+			eqParamInfo:     make(map[int32]paramInfo),
+			// TODO: make this configurable - assumes Neutron currently
+			eqFreqToPlug:   hzToNeutronEqLog,
+			eqFreqFromPlug: neutronEqLogToHz,
+			eqGainToPlug:   normToNeutronGain,
+			eqGainFromPlug: neutronToNormGain,
+			eqQToPlug:      octToNeutronQLog,
+			eqQFromPlug:    neutronQLogToOct,
+			eqTypeToPlug:   x32EqTypeToNeutron,
+			eqTypeFromPlug: neutronEqTypeToX32,
+		}
+		for secName, secParams := range sections {
+			switch secName {
+			case "eq":
+				for param, paramIndex := range secParams {
+					bits := strings.Split(param, "/")
+					if len(bits) != 2 {
+						return nil, fmt.Errorf("expected EQ FX param name format: type/[1-6]")
+						continue
+					}
+					eqIdx, err := strconv.Atoi(bits[1])
+					if err != nil {
+						return nil, err
+					}
+					if eqIdx < 1 || eqIdx > 6 {
+						return nil, fmt.Errorf("eq band %d out of range [1-6] in %s", eqIdx, fxName)
+					}
+					eqIdx-- // Adjust to zero-based
+					switch strings.ToLower(bits[0]) {
+					case "freq":
+						pt.eqFreqBandParam[eqIdx] = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: fmt.Sprintf("eq/%d/f", eqIdx+1),
+							normToX32:     hzToX32EqFreq,
+							plugToNorm:    neutronEqLogToHz,
+						}
+					case "gain":
+						pt.eqGainBandParam[eqIdx] = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: fmt.Sprintf("eq/%d/g", eqIdx+1),
+							normToX32:     func(g float32) float32 { return g },
+							plugToNorm:    neutronToNormGain,
+						}
+					case "q":
+						pt.eqQBandParam[eqIdx] = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: fmt.Sprintf("eq/%d/type", eqIdx+1),
+							normToX32:     func(g float32) float32 { return g },
+							plugToNorm:    neutronEqTypeToX32,
+							format:        func(a interface{}) interface{} { return int32(a.(float32)) },
+						}
+					case "type":
+						pt.eqTypeBandParam[eqIdx] = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: fmt.Sprintf("eq/%d/q", eqIdx+1),
+							normToX32:     octToX32Q,
+							plugToNorm:    neutronQLogToOct,
+						}
+					default:
+						return nil, fmt.Errorf("unknown eq param name %s in fxmap %s", bits[0], fxName)
+					}
+				}
+			case "gain":
+			case "dyn":
+			default:
+				return nil, fmt.Errorf("unknown section name %s in fxmap %s", secName, fxName)
+			}
+		}
+		ret[fxName] = pt
 	}
-	return ret
+	return ret, nil
 }
 
 func (p *Proxy) sendXremote() {
@@ -309,6 +385,7 @@ func (p *Proxy) sendMessagesToReaper(msgs []osc.Message) {
 	}
 }
 
+/*
 // nameHandler is a callback for dealing with FX param name messages from Reaper.
 // The parameter names are matched against the ones in the config file in order
 // to build the X32<->Reaper VST FX mappings.
@@ -345,7 +422,7 @@ func (p *Proxy) nameHandler(m *osc.Message) {
 	}
 
 	// is this a parameter name we're interested in?
-	param, ok := p.fxParamNameLookup[name]
+	param, ok := p.eqParamNameLookup[name]
 	if !ok {
 		return
 	}
@@ -407,6 +484,8 @@ func (p *Proxy) nameHandler(m *osc.Message) {
 	glog.V(2).Infof("Found track %d param %s at %d", selTrack.reaperTrackIndex, bits[0], pi32)
 }
 
+*/
+
 // configureReaperDispatcher configures a Dispatcher with registrations for all
 // Reaper originated OSC messages that we're interested in.
 func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
@@ -443,33 +522,17 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 				if !ok {
 					return
 				}
-				if len(name) == 0 {
+				name = strings.TrimSpace(name)
+				if len(name) == 0 && mapping.fxMap != nil && mapping.fxMap.reaEqIndex == fxIdx {
 					//TODO handle different plugins for each FX type
-					p._state.removeFx(rPfx, fxIdx)
+					//p._state.removeFx(rPfx, fxIdx)
 					return
 				}
 				if strings.Contains(name, p.fxPlugName) {
-					pt, ok := p._state.getPlugParams(name)
+					pt, ok := p.fxPlugParams[name]
 					if !ok {
-						pt = &plugParams{
-							plugName:        name,
-							eqTypeBandParam: make([]int32, 6),
-							eqFreqBandParam: make([]int32, 6),
-							eqGainBandParam: make([]int32, 6),
-							eqQBandParam:    make([]int32, 6),
-							eqParamInfo:     make(map[int32]paramInfo),
-							// TODO: make this configurable - assumes Neutron currently
-							eqFreqToPlug:   hzToNeutronEqLog,
-							eqFreqFromPlug: neutronEqLogToHz,
-							eqGainToPlug:   normToNeutronGain,
-							eqGainFromPlug: neutronToNormGain,
-							eqQToPlug:      octToNeutronQLog,
-							eqQFromPlug:    neutronQLogToOct,
-							eqTypeToPlug:   x32EqTypeToNeutron,
-							eqTypeFromPlug: neutronEqTypeToX32,
-						}
-
-						p._state.setPlugParams(name, pt)
+						glog.Infof("Unknown plug %q", name)
+						return
 					}
 					glog.Infof("Using %q at %d for FX on %s", name, fxIdx, mapping.reaperPrefix)
 					//TODO handle different plugins for each FX type
@@ -477,7 +540,7 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 						reaEqIndex:   fxIdx,
 						reaGateIndex: fxIdx,
 						reaDynIndex:  fxIdx,
-						plugParams:   pt,
+						plugParams:   &pt,
 					}
 				} else {
 					mapping.fxMap = nil
@@ -513,13 +576,15 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 		}
 	}
 
-	for fxIdx := 0; fxIdx < 10; fxIdx++ {
-		for paramIdx := 0; paramIdx < 300; paramIdx++ {
-			if err := d.AddMsgHandler(fmt.Sprintf("/fx/%d/fxparam/%d/name", fxIdx, paramIdx), p.nameHandler); err != nil {
-				return err
+	/*
+		for fxIdx := 0; fxIdx < 10; fxIdx++ {
+			for paramIdx := 0; paramIdx < 300; paramIdx++ {
+				if err := d.AddMsgHandler(fmt.Sprintf("/fx/%d/fxparam/%d/name", fxIdx, paramIdx), p.nameHandler); err != nil {
+					return err
+				}
 			}
 		}
-	}
+	*/
 	return nil
 }
 
