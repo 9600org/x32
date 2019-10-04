@@ -2,7 +2,6 @@ package x32
 
 import (
 	"fmt"
-	"sync"
 )
 
 // normalisationFunc is a transfer function for converting fx param values.
@@ -73,9 +72,6 @@ type fxInstance struct {
 
 // fxMap represents the VST<->X32 mapping of effects.
 type fxMap struct {
-	// mu protects the fields below.
-	mu sync.RWMutex
-
 	eq   *fxInstance
 	gate *fxInstance
 	dyn  *fxInstance

@@ -147,6 +147,7 @@ type trackMap struct {
 }
 
 type mapping struct {
+	mu               sync.RWMutex // protects all below
 	reaperPrefix     string
 	reaperTrackIndex int32
 	fxMap            fxMap
@@ -427,6 +428,9 @@ func (p *Proxy) configureReaperDispatcher(d osc.Dispatcher) error {
 			fxIdx := fxIdx
 			fxNameAddr := fmt.Sprintf("/%s/fx/%d/name", rPfx, fxIdx)
 			if err := d.AddMsgHandler(fxNameAddr, func(msg *osc.Message) {
+				mapping.mu.Lock()
+				defer mapping.mu.Unlock()
+
 				name, ok := msg.Arguments[0].(string)
 				if !ok {
 					return

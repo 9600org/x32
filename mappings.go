@@ -40,12 +40,18 @@ var (
 	reaperX32StripMap = map[string]targetTransform{
 		"volume": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				msg.Address = fmt.Sprintf("/%s/mix/fader", m.x32Prefix)
 				return []osc.Message{msg}, nil
 			},
 		},
 		"mute": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				f, ok := msg.Arguments[0].(float32)
 				if !ok {
 					return nil, fmt.Errorf("argument 0 is a %T, expected float32", msg.Arguments[0])
@@ -61,12 +67,18 @@ var (
 		},
 		"pan": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				msg.Address = fmt.Sprintf("/%s/mix/pan", m.x32Prefix)
 				return []osc.Message{msg}, nil
 			},
 		},
 		"select": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				eq, err := isArgEq(msg, 0, float32(0))
 				if err != nil {
 					return nil, err
@@ -98,6 +110,9 @@ var (
 		},
 		"solo": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("got %d arguments, expected 1", l)
 				}
@@ -112,6 +127,9 @@ var (
 		},
 		"name": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				name, ok := msg.Arguments[0].(string)
 				if !ok {
 					return nil, fmt.Errorf("got %T arg, expected string", msg.Arguments[0])
@@ -151,11 +169,13 @@ var (
 		// TODO: bypass?
 		"fx/%d/fxparam/%d/value": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				fxMap := m.fxMap
 				//TODO broken for different plugs handling different fx
 				//		msg.Address = fmt.Sprintf("/%s/%s", m.reaperPrefix, tt.target)
 				bits := strings.Split(msg.Address, "/")
@@ -171,7 +191,7 @@ var (
 					return nil, err
 				}
 				var fxInst *fxInstance
-				for _, instance := range []*fxInstance{fxMap.eq, fxMap.gate, fxMap.dyn} {
+				for _, instance := range []*fxInstance{m.fxMap.eq, m.fxMap.gate, m.fxMap.dyn} {
 					if instance == nil {
 						continue
 					}
@@ -250,12 +270,18 @@ var (
 	x32ReaperStripMap = map[string]targetTransform{
 		"mix/fader": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				msg.Address = fmt.Sprintf("/%s/volume", m.reaperPrefix)
 				return []osc.Message{msg}, nil
 			},
 		},
 		"mix/on": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				i, err := NotInt(msg.Arguments[0])
 				if err != nil {
 					return nil, err
@@ -277,6 +303,9 @@ var (
 		},
 		"mix/pan": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				msg.Address = fmt.Sprintf("/%s/pan", m.reaperPrefix)
 				return []osc.Message{msg}, nil
 			},
@@ -287,6 +316,9 @@ var (
 	x32ReaperStripFXMap = map[string]targetTransform{
 		"eq/%d/on": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("eq/_/on: got %d arguments, expected 1", l)
 				}
@@ -301,8 +333,10 @@ var (
 		},
 		"eq/%d/type": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				fxMap := m.fxMap
-				if fxMap.eq == nil {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.eq == nil {
 					return nil, fmt.Errorf("fxMap.eq nil")
 				}
 				x32EqType, err := getIntArg(msg, 0)
@@ -310,53 +344,59 @@ var (
 					return nil, err
 				}
 
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.eq.vstIndex, fxMap.eq.params.eqTypeBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{fxMap.eq.params.eqTypeToPlug(float32(x32EqType))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.eq.params.eqTypeBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{m.fxMap.eq.params.eqTypeToPlug(float32(x32EqType))}
 				return []osc.Message{msg}, nil
 			},
 		},
 		"eq/%d/q": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				fxMap := m.fxMap
-				if fxMap.eq == nil {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.eq == nil {
 					return nil, fmt.Errorf("fxMap.eq nil")
 				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.eq.vstIndex, fxMap.eq.params.eqQBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{fxMap.eq.params.eqQToPlug(x32QLogToOct(f))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.eq.params.eqQBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{m.fxMap.eq.params.eqQToPlug(x32QLogToOct(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
 		"eq/%d/f": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				fxMap := m.fxMap
-				if fxMap.eq == nil {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.eq == nil {
 					return nil, fmt.Errorf("fxMap.eq nil")
 				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.eq.vstIndex, fxMap.eq.params.eqFreqBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{fxMap.eq.params.eqFreqToPlug(x32EqFreqLogToHz(f))}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.eq.params.eqFreqBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{m.fxMap.eq.params.eqFreqToPlug(x32EqFreqLogToHz(f))}
 				return []osc.Message{msg}, nil
 			},
 		},
 		"eq/%d/g": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
-				fxMap := m.fxMap
-				if fxMap.eq == nil {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.eq == nil {
 					return nil, fmt.Errorf("fxMap.eq nil")
 				}
 				f, err := getFloatArg(msg, 0)
 				if err != nil {
 					return nil, err
 				}
-				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, fxMap.eq.vstIndex, fxMap.eq.params.eqGainBandParam[tt.fxIndex])
-				msg.Arguments = []interface{}{fxMap.eq.params.eqGainToPlug(f)}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.eq.params.eqGainBandParam[tt.fxIndex])
+				msg.Arguments = []interface{}{m.fxMap.eq.params.eqGainToPlug(f)}
 				return []osc.Message{msg}, nil
 			},
 		},
@@ -365,6 +405,9 @@ var (
 	x32ReaperStatMap = map[string]targetTransform{
 		"-stat/solosw": targetTransform{
 			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
 				if l := len(msg.Arguments); l != 1 {
 					return nil, fmt.Errorf("unexpected number of arguments (%d), expected 1", l)
 				}
