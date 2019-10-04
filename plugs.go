@@ -62,6 +62,13 @@ type plugParams struct {
 	eqTypeToPlug normalisationFunc
 	// eqTypeFromPlug converts from the VST plugin representation of eq type to X32 id.
 	eqTypeFromPlug normalisationFunc
+
+	gateEnableParam    int32
+	gateThresholdParam int32
+	gateRangeParam     int32
+	gateAttackParam    int32
+	gateHoldParam      int32
+	gateReleaseParam   int32
 }
 
 type fxInstance struct {

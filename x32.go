@@ -314,7 +314,51 @@ func buildPlugParamsMap(m map[string]map[string]map[string]int32) (map[string]pl
 						return nil, fmt.Errorf("unknown eq param name %s in fxmap %s", bits[0], fxName)
 					}
 				}
-			case "gain":
+			case "gate":
+				for param, paramIndex := range secParams {
+					switch strings.ToLower(param) {
+					case "threshold":
+						pt.gateThresholdParam = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: "gate/thr",
+							normToX32:     func(g float32) float32 { return g },
+							plugToNorm:    func(g float32) float32 { return g }, // TODO linf[-80, 0, 0.5]
+						}
+					case "range":
+						pt.gateRangeParam = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: "gate/range",
+							normToX32:     func(g float32) float32 { return g },
+							plugToNorm:    func(g float32) float32 { return g }, // TODO linf[3, 60, 1]
+						}
+					case "attack":
+						pt.gateAttackParam = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: "gate/attack",
+							normToX32:     func(g float32) float32 { return g },
+							plugToNorm:    func(g float32) float32 { return g }, // TODO linf[0, 120, 1]
+							format:        func(a interface{}) interface{} { return int32(a.(float32)) },
+						}
+					case "hold":
+						pt.gateHoldParam = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: "gate/hold",
+							normToX32:     func(g float32) float32 { return g },
+							plugToNorm:    func(g float32) float32 { return g }, // TODO linf[0, 120, 1]
+							format:        func(a interface{}) interface{} { return int32(a.(float32)) },
+						}
+					case "release":
+						pt.gateReleaseParam = paramIndex
+						pt.eqParamInfo[paramIndex] = paramInfo{
+							x32AddrFormat: "gate/release",
+							normToX32:     func(g float32) float32 { return g },
+							plugToNorm:    func(g float32) float32 { return g }, // TODO linf[0, 120, 1]
+							format:        func(a interface{}) interface{} { return int32(a.(float32)) },
+						}
+					default:
+						return nil, fmt.Errorf("unknown eq param name %s in fxmap %s", param, fxName)
+					}
+				}
 			case "dyn":
 			default:
 				return nil, fmt.Errorf("unknown section name %s in fxmap %s", secName, fxName)
@@ -532,8 +576,13 @@ func (p *Proxy) configureX32Dispatcher(d osc.Dispatcher) error {
 			fxAddr := fxAddr
 
 			x32FxAddrTemplate := fmt.Sprintf("/%s/%s", xPfx, fxAddr)
-			// TODO: 4 for most things, 6 for bus
-			for i := int32(1); i <= 6; i++ {
+
+			// TODO: EQ - 4 for most things, 6 for bus
+			max := int32(1)
+			if strings.Contains(fxAddr, "%d") {
+				max = 6
+			}
+			for i := int32(1); i <= max; i++ {
 				ttFx := ttFxTemplate
 				ttFx.fxIndex = i - 1
 				x32FxAddr := fmt.Sprintf(x32FxAddrTemplate, i)

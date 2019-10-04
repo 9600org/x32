@@ -326,9 +326,8 @@ var (
 				if !ok {
 					return nil, fmt.Errorf("eq/_/on: got %T argument, expected int32", i)
 				}
-				msg.Arguments[0] = i ^ 1
-				msg.Address = fmt.Sprintf("/%s/fxeq/band/%d/bypass", m.reaperPrefix, tt.fxIndex)
-				return []osc.Message{msg}, nil
+				//TODO not mapped
+				return []osc.Message{}, nil
 			},
 		},
 		"eq/%d/type": targetTransform{
@@ -397,6 +396,111 @@ var (
 				}
 				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.eq.params.eqGainBandParam[tt.fxIndex])
 				msg.Arguments = []interface{}{m.fxMap.eq.params.eqGainToPlug(f)}
+				return []osc.Message{msg}, nil
+			},
+		},
+		// Gate
+		// TODO: normalisation mapping funcs are all wrong.
+		"gate/on": targetTransform{
+			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if l := len(msg.Arguments); l != 1 {
+					return nil, fmt.Errorf("gate/_/on: got %d arguments, expected 1", l)
+				}
+				i, ok := msg.Arguments[0].(int32)
+				if !ok {
+					return nil, fmt.Errorf("gate/_/on: got %T argument, expected int32", i)
+				}
+				msg.Arguments[0] = i ^ 1
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.eq.params.gateEnableParam)
+				msg.Address = fmt.Sprintf("/%s/fx/band/%d/bypass", m.reaperPrefix, tt.fxIndex)
+				return []osc.Message{msg}, nil
+			},
+		},
+		"gate/thr": targetTransform{
+			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.gate == nil {
+					return nil, fmt.Errorf("fxMap.gate nil")
+				}
+				f, err := getFloatArg(msg, 0)
+				if err != nil {
+					return nil, err
+				}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.gate.params.gateThresholdParam)
+				msg.Arguments = []interface{}{m.fxMap.gate.params.eqGainToPlug(f)}
+				return []osc.Message{msg}, nil
+			},
+		},
+		"gate/range": targetTransform{
+			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.gate == nil {
+					return nil, fmt.Errorf("fxMap.gate nil")
+				}
+				f, err := getFloatArg(msg, 0)
+				if err != nil {
+					return nil, err
+				}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.gate.params.gateRangeParam)
+				msg.Arguments = []interface{}{m.fxMap.gate.params.eqGainToPlug(f)}
+				return []osc.Message{msg}, nil
+			},
+		},
+		"gate/attack": targetTransform{
+			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.gate == nil {
+					return nil, fmt.Errorf("fxMap.gate nil")
+				}
+				f, err := getFloatArg(msg, 0)
+				if err != nil {
+					return nil, err
+				}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.gate.params.gateAttackParam)
+				msg.Arguments = []interface{}{m.fxMap.gate.params.eqGainToPlug(f)}
+				return []osc.Message{msg}, nil
+			},
+		},
+		"gate/hold": targetTransform{
+			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.gate == nil {
+					return nil, fmt.Errorf("fxMap.gate nil")
+				}
+				f, err := getFloatArg(msg, 0)
+				if err != nil {
+					return nil, err
+				}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.gate.params.gateHoldParam)
+				msg.Arguments = []interface{}{m.fxMap.gate.params.eqGainToPlug(f)}
+				return []osc.Message{msg}, nil
+			},
+		},
+		"gate/release": targetTransform{
+			transform: func(tt *targetTransform, m *mapping, msg osc.Message) ([]osc.Message, error) {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+
+				if m.fxMap.gate == nil {
+					return nil, fmt.Errorf("fxMap.gate nil")
+				}
+				f, err := getFloatArg(msg, 0)
+				if err != nil {
+					return nil, err
+				}
+				msg.Address = fmt.Sprintf("/%s/fx/%d/fxparam/%d/value", m.reaperPrefix, m.fxMap.eq.vstIndex, m.fxMap.gate.params.gateReleaseParam)
+				msg.Arguments = []interface{}{m.fxMap.gate.params.eqGainToPlug(f)}
 				return []osc.Message{msg}, nil
 			},
 		},
