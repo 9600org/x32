@@ -13,6 +13,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+var (
+	newDispatcher func() osc.Dispatcher = NewExactDispatcher
+)
+
 type ProxyConfig struct {
 	ListenAddress string `yaml:"listenAddress"`
 	ReaperAddress string `yaml:"reaperAddress"`
@@ -188,7 +192,7 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 		return nil, fmt.Errorf("failed to dial x32: %s", err)
 	}
 	xServerConn.SetReadBuffer(1 << 20)
-	xClient := Client{xServerConn}
+	xClient := &UDPClient{xServerConn}
 
 	rAddr, rPort, err := splitAddress(config.ReaperAddress)
 	if err != nil {
@@ -203,7 +207,7 @@ func NewProxy(config ProxyConfig) (*Proxy, error) {
 		return nil, fmt.Errorf("failed to dial reaper: %v", err)
 	}
 	rClientConn.SetReadBuffer(1 << 20)
-	rClient := Client{rClientConn}
+	rClient := &UDPClient{rClientConn}
 
 	glog.V(1).Infof("Building maps")
 
@@ -380,11 +384,11 @@ func (p *Proxy) ListenAndServe() error {
 	defer close(done)
 
 	glog.V(1).Infof("Building Reaper dispatcher")
-	p.reaperServer.Dispatcher = NewExactDispatcher()
+	p.reaperServer.Dispatcher = newDispatcher()
 	p.configureReaperDispatcher(p.reaperServer.Dispatcher)
 
 	glog.V(1).Infof("Building X32 dispatcher")
-	p.x32Server.Dispatcher = NewExactDispatcher()
+	p.x32Server.Dispatcher = newDispatcher()
 	p.configureX32Dispatcher(p.x32Server.Dispatcher)
 
 	glog.V(1).Infof("Starting server")

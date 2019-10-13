@@ -1,8 +1,8 @@
 package x32
 
 import (
-	"time"
 	"github.com/9600org/go-osc/osc"
+	"time"
 )
 
 type ExactDispatcher struct {
@@ -11,8 +11,7 @@ type ExactDispatcher struct {
 
 var _ osc.Dispatcher = &ExactDispatcher{}
 
-
-func NewExactDispatcher() *ExactDispatcher {
+func NewExactDispatcher() osc.Dispatcher {
 	return &ExactDispatcher{
 		handlers: make(map[string]osc.Handler),
 	}

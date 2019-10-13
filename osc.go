@@ -8,11 +8,17 @@ import (
 	"github.com/9600org/go-osc/osc"
 )
 
-type Client struct {
+type Client interface {
+	Send(osc.Packet) error
+}
+
+type UDPClient struct {
 	Conn *net.UDPConn
 }
 
-func (c *Client) Send(p osc.Packet) error {
+var _ Client = &UDPClient{}
+
+func (c *UDPClient) Send(p osc.Packet) error {
 	data, err := p.MarshalBinary()
 	if err != nil {
 		return err
