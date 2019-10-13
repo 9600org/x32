@@ -91,5 +91,5 @@ func (f *fxMap) String() string {
 		}
 		return fmt.Sprintf("@%d", f.vstIndex)
 	}
-	return fmt.Sprintf("fxMap:{eq:%d gate:%s dyn:%s}", nilOrIdx(f.eq), nilOrIdx(f.gate), nilOrIdx(f.dyn))
+	return fmt.Sprintf("fxMap:{eq:%s gate:%s dyn:%s}", nilOrIdx(f.eq), nilOrIdx(f.gate), nilOrIdx(f.dyn))
 }
