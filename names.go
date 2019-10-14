@@ -67,6 +67,9 @@ func guessColourAndIcon(nameHints []nameHint, name string) (int32, int32) {
 				}
 			}
 		}
+		if colID == -1 {
+			colID = WH  // Override with a visible default
+		}
 	}
 	return colID, iconID
 }

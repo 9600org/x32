@@ -24,9 +24,9 @@ func TestNameHints(t *testing.T) {
 		{name: "banana bass guitar", wantIcon: 1, wantColour: RD},
 		{name: "BASS", wantIcon: 1, wantColour: RD},
 		{name: "BasS", wantIcon: 1, wantColour: RD},
-		{name: "Drum", wantIcon: -1, wantColour: -1},
+		{name: "Drum", wantIcon: -1, wantColour: WH},  // default colour for non-empty name
 		{name: "Drumses", wantIcon: 3, wantColour: BL},
-		{name: "Big red bus", wantIcon: 5, wantColour: -1}, // "bus" hint  sets icon only
+		{name: "Big red bus", wantIcon: 5, wantColour: WH}, // "bus" hint sets icon only, colour is default non-empty
 		{name: "Bass bus", wantIcon: 5, wantColour: RD},    // icon from "bus" hint, colour from "bass"
 	} {
 		t.Run(test.name, func(t *testing.T) {
