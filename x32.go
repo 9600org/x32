@@ -103,6 +103,9 @@ func (s *state) getTrackMappingForX32StatID(id int32) (mapping, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	m, ok := s.trackMap.x32StatIndex[id]
+	if !ok {
+		return mapping{}, false
+	}
 	return *m, ok
 }
 

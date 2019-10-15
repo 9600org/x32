@@ -121,7 +121,7 @@ var (
 					return nil, fmt.Errorf("got %T arg, expected float32", msg.Arguments[0])
 				}
 				msg.Arguments[0] = int32(f)
-				msg.Address = fmt.Sprintf("/-stat/solosw/%02d", m.x32StatIndex)
+				msg.Address = fmt.Sprintf("/-stat/solosw/%02d", m.x32StatIndex+1)
 				return []osc.Message{msg}, nil
 			},
 		},
